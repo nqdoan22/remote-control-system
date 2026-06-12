@@ -1,0 +1,6 @@
+<Window x:Class="RemoteControlClient.Views.PermissionSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Permission Settings" Height="500" Width="600">
+    <!-- TODO: Danh sách 8 module, mỗi module có ComboBox: Always Ask / Always Allow / Always Deny -->
+</Window>
