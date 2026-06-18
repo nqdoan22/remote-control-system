@@ -1,21 +1,21 @@
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from routers import auth, machines, modules
+import asyncio
 
-app = FastAPI(title="Remote Control System - Web API")
+app = FastAPI()
+client = GatewayClient("ws://localhost:8765")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+@app.on_event("startup")
+async def startup_event():
+    # Khởi chạy kết nối trong background khi server bật
+    asyncio.create_task(client.connect())
 
-app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
-app.include_router(machines.router, prefix="/api/machines", tags=["Machines"])
-app.include_router(modules.router, prefix="/api/modules", tags=["Modules"])
-
-@app.get("/")
-def root():
-    return {"message": "Remote Control System API"}
+@app.post("/control/{machine_id}")
+async def control_machine(machine_id: str, command: dict):
+    # API endpoint để Frontend gọi lệnh
+    await client.send_command(
+        machine_id=machine_id,
+        module=command["module"],
+        action=command["action"],
+        payload=command["payload"]
+    )
+    return {"status": "sent"}
