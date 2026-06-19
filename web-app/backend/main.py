@@ -1,23 +1,17 @@
 import asyncio
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 # ĐƯỜNG DẪN IMPORT PHẢI CHÍNH XÁC:
-# Nếu file gateway_client.py nằm trong folder 'core', bạn phải import từ 'core.gateway_client'
 from core.gateway_client import GatewayClient 
 from core import handlers
 from routers import auth
 
-# ... setup app ...
-app = FastAPI()
-app.include_router(auth.router)
-
-# 1. Khởi tạo instance
+# 1. Khởi tạo Gateway Client instance
 client = GatewayClient("ws://localhost:8765")
 
-# ... (phần setup_handlers và lifespan giống code cũ) ...
-
-# 2. Hàm đăng ký các sự kiện
+# 2. Hàm đăng ký các sự kiện xử lý từ Gateway gửi về
 def setup_handlers():
     client.on("applications_list_response", handlers.handle_application_list)
     client.on("process_list_response", handlers.handle_process_list)
@@ -27,20 +21,35 @@ def setup_handlers():
 # 3. Sử dụng lifespan để quản lý vòng đời ứng dụng (Thay cho @app.on_event)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # --- Startup ---
-    setup_handlers()
-    # Khởi chạy kết nối Gateway trong background
-    gateway_task = asyncio.create_task(client.connect())
+    # # --- Startup (Chạy khi server bật) ---
+    # setup_handlers()
+    # # Khởi chạy kết nối Gateway trong background
+    # gateway_task = asyncio.create_task(client.connect())
     
-    yield # Server bắt đầu chạy
+    yield # Server bắt đầu nhận request từ người dùng
     
-    # --- Shutdown ---
-    # Hủy task kết nối khi tắt server
-    gateway_task.cancel()
+    # --- Shutdown (Chạy khi tắt server) ---
+    # gateway_task.cancel()
+    # try:
+    #     await gateway_task
+    # except asyncio.CancelledError:
+    #     pass
 
-app = FastAPI(lifespan=lifespan)
+# 4. Khởi tạo ứng dụng FastAPI DUY NHẤT và gắn lifespan vào
+app = FastAPI(title="Remote Control System API", lifespan=lifespan)
 
-# 4. API Endpoints
+# 5. CẤU HÌNH CORS (Sửa lỗi chặn Đăng nhập từ Frontend)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Cho phép TẤT CẢ các origin truy cập, không bao giờ lo bị chặn CORS nữa
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+# 6. Đăng ký các Router chức năng
+app.include_router(auth.router)
+
+# 7. API Endpoints
 @app.post("/control/{machine_id}")
 async def control_machine(machine_id: str, command: dict):
     """
@@ -65,5 +74,5 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    # Chạy server
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    # Ép uvicorn chạy chính xác trên IP số 127.0.0.1 để khớp với Frontend
+    uvicorn.run(app, host="127.0.0.1", port=8000)
