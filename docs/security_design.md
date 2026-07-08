@@ -33,13 +33,13 @@ Hệ thống được chia thành các vùng tin cậy như sau:
 +-----------------------------------------+
 | Administrator                           |
 +-----------------------------------------+
-                 │
-                 ▼
-+-----------------------------------------+
-| Web App                                |
-+-----------------------------------------+
+                ▼
 
-============= Trust Boundary =============
+            Gateway
+
+                ▼
+
+            Client App
 
 +-----------------------------------------+
 | Gateway                                |
@@ -48,7 +48,7 @@ Hệ thống được chia thành các vùng tin cậy như sau:
 ============= Trust Boundary =============
 
 +-----------------------------------------+
-| Agent                                  |
+| Client App                             |
 +-----------------------------------------+
                  │
                  ▼
@@ -83,14 +83,14 @@ Các kết nối không hợp lệ sẽ bị từ chối.
 
 ---
 
-## Agent Authentication
+## Client App Authentication
 
-Mỗi Agent có:
+Mỗi Client App có:
 
 - machineId
 - machineSecret
 
-Gateway sử dụng hai thông tin này để xác thực Agent trước khi cho phép đăng ký vào hệ thống.
+Gateway sử dụng hai thông tin này để xác thực Client App trước khi cho phép đăng ký vào hệ thống.
 
 ---
 
@@ -108,14 +108,14 @@ Gateway chỉ cho phép:
 
 ---
 
-### Agent
+### Client App
 
 - Gửi Heartbeat.
 - Gửi Response.
 - Gửi Streaming Data.
 - Gửi Event.
 
-Agent không được phép gửi Command tới Agent khác hoặc Web App.
+Client App không được phép gửi Command tới Client App khác hoặc Web App.
 
 ---
 
@@ -143,7 +143,7 @@ Gateway
 
 ↓
 
-Agent
+Client App
 
 ↓
 
@@ -167,7 +167,7 @@ Nếu End User từ chối:
 
 # File Sandbox
 
-Agent chỉ được phép truy cập thư mục đã cấu hình.
+Client App chỉ được phép truy cập thư mục đã cấu hình.
 
 Ví dụ:
 
@@ -196,13 +196,13 @@ Người dùng luôn biết khi một chức năng nhạy cảm đang được s
 
 # Connection Security
 
-Gateway giám sát trạng thái kết nối của Agent thông qua Heartbeat.
+Gateway giám sát trạng thái kết nối của Client App thông qua Heartbeat.
 
 Nếu Heartbeat không được nhận trong khoảng thời gian quy định:
 
 - Machine được đánh dấu Offline.
 - Administrator được cập nhật trạng thái.
-- Agent sẽ tự động kết nối lại khi có thể.
+- Client App sẽ tự động kết nối lại khi có thể.
 
 ---
 
@@ -237,7 +237,7 @@ Mitigation
 
 ---
 
-## Giả mạo Agent
+## Giả mạo Client App
 
 Mitigation
 
@@ -272,7 +272,7 @@ Mitigation
 
 ---
 
-## Agent mất kết nối
+## Client App mất kết nối
 
 Mitigation
 
@@ -287,7 +287,7 @@ Hệ thống giả định rằng:
 
 - Gateway là thành phần đáng tin cậy.
 - Administrator sử dụng tài khoản hợp lệ.
-- Agent được cài đặt bởi người quản trị.
+- Client App được cài đặt bởi người quản trị.
 - Các thành phần hoạt động trong cùng mạng LAN.
 
 ---
@@ -296,7 +296,7 @@ Hệ thống giả định rằng:
 
 ## Tại sao Gateway kiểm tra quyền?
 
-Để tránh Agent phải tự xử lý Authorization và giúp việc quản lý quyền tập trung hơn.
+Để tránh Client App phải tự xử lý Authorization và giúp việc quản lý quyền tập trung hơn.
 
 ---
 
@@ -308,7 +308,7 @@ Nhằm bảo vệ quyền riêng tư và đáp ứng yêu cầu của đồ án.
 
 ## Tại sao sử dụng File Sandbox?
 
-Giới hạn phạm vi truy cập tệp giúp giảm thiểu rủi ro nếu Agent nhận được yêu cầu không hợp lệ.
+Giới hạn phạm vi truy cập tệp giúp giảm thiểu rủi ro nếu Client App nhận được yêu cầu không hợp lệ.
 
 ---
 

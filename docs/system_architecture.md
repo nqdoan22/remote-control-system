@@ -8,7 +8,7 @@ Hệ thống được thiết kế theo mô hình **3-tier architecture**, gồm
 
 - Web App
 - Gateway
-- Agent
+- Client App
 
 Mỗi thành phần có một trách nhiệm riêng và giao tiếp thông qua giao thức WebSocket.
 
@@ -50,7 +50,7 @@ Mỗi thành phần có một trách nhiệm riêng và giao tiếp thông qua g
         ┌──────────────────┼──────────────────┐
         ▼                  ▼                  ▼
 +---------------+  +---------------+  +---------------+
-|    Agent A    |  |    Agent B    |  |    Agent N    |
+| Client App A   |  | Client App B   |  | Client App N   |
 +---------------+  +---------------+  +---------------+
 ```
 
@@ -73,7 +73,7 @@ Web App là thành phần mà Administrator sử dụng để quản lý hệ th
 
 ### Không chịu trách nhiệm
 
-- Quản lý kết nối tới Agent.
+- Quản lý kết nối tới Client App.
 - Thực thi lệnh trên Machine.
 - Xử lý dữ liệu Streaming.
 
@@ -86,8 +86,8 @@ Gateway là trung tâm giao tiếp của toàn bộ hệ thống.
 ### Responsibilities
 
 - Quản lý kết nối WebSocket.
-- Xác thực Backend và Agent.
-- Lưu danh sách Agent đang Online.
+- Xác thực Backend và Client App.
+- Lưu danh sách Client App đang Online.
 - Định tuyến Message.
 - Quản lý Heartbeat.
 - Chuyển tiếp dữ liệu Streaming.
@@ -101,9 +101,9 @@ Gateway là trung tâm giao tiếp của toàn bộ hệ thống.
 
 ---
 
-## Agent
+## Client App
 
-Agent chạy trên từng Machine.
+Client App chạy trên từng Machine.
 
 ### Responsibilities
 
@@ -145,7 +145,7 @@ Agent chạy trên từng Machine.
 
 ---
 
-## Agent
+## Client App
 
 - Gateway Client
 - Command Dispatcher
@@ -163,7 +163,7 @@ Agent chạy trên từng Machine.
 # Connection Lifecycle
 
 ```text
-Agent Start
+Client App Start
       │
       ▼
 Connect Gateway
@@ -210,7 +210,7 @@ Web App
 Gateway
       │
       ▼
-Agent
+Client App
       │
 Execute Command
       │
@@ -245,7 +245,7 @@ Các chức năng liên quan được nhóm trong cùng một module.
 
 ## Scalability
 
-Gateway có thể quản lý đồng thời nhiều Agent.
+Gateway có thể quản lý đồng thời nhiều Client App.
 
 Kiến trúc cho phép bổ sung thêm Machine mà không cần thay đổi Web App.
 
@@ -261,25 +261,25 @@ Các module được tách biệt rõ ràng, giúp dễ bảo trì và mở rộ
 
 ## Tại sao sử dụng Gateway?
 
-Gateway đóng vai trò là điểm trung gian duy nhất giữa Web App và Agent.
+Gateway đóng vai trò là điểm trung gian duy nhất giữa Web App và Client App.
 
 Lợi ích:
 
 - Giảm coupling giữa các thành phần.
 - Web App chỉ cần quản lý một kết nối.
 - Dễ mở rộng nhiều Machine.
-- Tập trung quản lý kết nối và trạng thái Agent.
+- Tập trung quản lý kết nối và trạng thái Client App.
 
 ---
 
-## Tại sao Agent chủ động kết nối?
+## Tại sao Client App chủ động kết nối?
 
-Agent luôn chủ động kết nối tới Gateway thay vì Gateway kết nối trực tiếp tới Agent.
+Client App luôn chủ động kết nối tới Gateway thay vì Gateway kết nối trực tiếp tới Client App.
 
 Lợi ích:
 
 - Không cần mở cổng trên Machine.
-- Dễ xử lý khi Agent mất kết nối.
+- Dễ xử lý khi Client App mất kết nối.
 - Đơn giản hóa quá trình triển khai.
 
 ---
@@ -300,7 +300,7 @@ Phù hợp cho:
 # Assumptions
 
 - Tất cả Machine đều chạy Windows.
-- Agent đã được cài đặt trước.
+- Client App đã được cài đặt trước.
 - Các thành phần hoạt động trong cùng mạng LAN.
 
 ---

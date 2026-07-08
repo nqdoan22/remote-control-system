@@ -7,7 +7,7 @@ Tài liệu này mô tả giao thức truyền thông giữa các thành phần 
 Các kết nối bao gồm:
 
 - Web App ↔ Gateway
-- Gateway ↔ Agent
+- Gateway ↔ Client App
 
 Toàn bộ dữ liệu được truyền dưới dạng **JSON** thông qua **WebSocket**.
 
@@ -27,7 +27,7 @@ Administrator
       │
       │ Request
       ▼
-    Agent
+    Client App
       │
       │ Response
       ▼
@@ -59,7 +59,7 @@ Mọi message trong hệ thống đều sử dụng cùng một cấu trúc.
   "type": "process.list",
   "timestamp": 1710000000,
   "source": "gateway",
-  "destination": "agent-01",
+  "destination": "client-app-01",
   "payload": {}
 }
 ```
@@ -194,10 +194,10 @@ Connection Accepted
 
 ---
 
-## Agent Authentication
+## Client App Authentication
 
 ```text
-Agent
+Client App
    │
 Connect
    │
@@ -212,13 +212,13 @@ Authenticate
 Register
 ```
 
-Sau khi xác thực thành công, Agent sẽ được thêm vào Machine Registry.
+Sau khi xác thực thành công, Client App sẽ được thêm vào Machine Registry.
 
 ---
 
 # Heartbeat
 
-Agent gửi Heartbeat định kỳ.
+Client App gửi Heartbeat định kỳ.
 
 ```json
 {
@@ -231,7 +231,7 @@ Agent gửi Heartbeat định kỳ.
 
 Gateway sử dụng Heartbeat để:
 
-- Kiểm tra Agent còn hoạt động.
+- Kiểm tra Client App còn hoạt động.
 - Cập nhật trạng thái Machine.
 - Phát hiện mất kết nối.
 
@@ -249,7 +249,7 @@ Web App
 Gateway
       │
       ▼
-Agent
+  Client App
       │
 Execute
       │
@@ -304,6 +304,8 @@ Gateway không xử lý hình ảnh.
 Quy trình Upload / Download:
 
 ```text
+Upload:
+
 Web App
 
 ↓
@@ -312,8 +314,31 @@ Gateway
 
 ↓
 
-Agent
+Client App
 
+↓
+
+Sandbox Folder
+
+↓
+
+Gateway
+
+↓
+
+Web App
+
+Download:
+
+Web App
+
+↓
+
+Gateway
+
+↓
+
+Client App
 ↓
 
 Sandbox Folder
@@ -327,13 +352,15 @@ Gateway
 Web App
 ```
 
-Agent chỉ được phép truy cập thư mục Sandbox.
+Client App chỉ được phép truy cập thư mục Sandbox.
 
----
+Mọi yêu cầu file transfer phải kiểm tra đường dẫn trước khi thực hiện.
+
+Nếu đường dẫn nằm ngoài Sandbox, hệ thống trả về `INVALID_PATH`.
 
 # Error Response
 
-Nếu xảy ra lỗi, Agent hoặc Gateway trả về:
+Nếu xảy ra lỗi, Client App hoặc Gateway trả về:
 
 ```json
 {

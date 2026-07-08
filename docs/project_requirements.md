@@ -26,13 +26,13 @@ Kiến trúc gồm ba thành phần độc lập:
 
 - Web App
 - Gateway
-- Agent
+- Client App
 
 Trong đó:
 
 - **Web App** là giao diện dành cho Administrator.
-- **Gateway** là trung gian quản lý toàn bộ kết nối giữa Web App và Agent.
-- **Agent** chạy trên từng máy được điều khiển và thực thi các lệnh.
+- **Gateway** là trung gian quản lý toàn bộ kết nối giữa Web App và Client App.
+- **Client App** chạy trên từng máy được điều khiển và thực thi các lệnh.
 
 ---
 
@@ -43,8 +43,8 @@ Trong đó:
 - Toàn bộ hệ thống chạy trên Windows.
 - Hỗ trợ điều khiển đồng thời nhiều máy.
 - Giao tiếp thời gian thực bằng WebSocket.
-- Agent chủ động kết nối tới Gateway.
-- Gateway là điểm kết nối duy nhất giữa Web App và Agent.
+- Client App chủ động kết nối tới Gateway.
+- Gateway là điểm kết nối duy nhất giữa Web App và Client App.
 
 ---
 
@@ -72,10 +72,15 @@ Trong đó:
 
 ### Screen Monitoring
 
+#### Screenshot
+
 - Chụp ảnh màn hình.
+
+#### Live Screen
+
 - Xem màn hình trực tiếp.
 
-Chức năng này yêu cầu người dùng trên máy xác nhận trước khi bắt đầu.
+Chức năng Live Screen yêu cầu người dùng trên máy xác nhận trước khi bắt đầu.
 
 ### Webcam
 
@@ -117,7 +122,7 @@ Hệ thống phải đảm bảo các yêu cầu sau:
 
 - Administrator phải đăng nhập trước khi sử dụng.
 - Gateway chỉ chấp nhận các kết nối hợp lệ.
-- Agent phải được xác thực trước khi tham gia hệ thống.
+- Client App phải được xác thực trước khi tham gia hệ thống.
 - Các chức năng nhạy cảm yêu cầu sự đồng ý của End User.
 - Ghi nhận toàn bộ thao tác điều khiển để phục vụ kiểm tra.
 - Không cho phép truy cập tệp ngoài thư mục được cấp quyền.
@@ -126,7 +131,7 @@ Hệ thống phải đảm bảo các yêu cầu sau:
 
 ## Non-functional Requirements
 
-- Hỗ trợ nhiều Agent hoạt động đồng thời.
+- Hỗ trợ nhiều Client App hoạt động đồng thời.
 - Hoạt động ổn định trong môi trường mạng LAN.
 - Kiến trúc dễ mở rộng.
 - Các module độc lập và dễ bảo trì.

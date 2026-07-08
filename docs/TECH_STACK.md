@@ -8,14 +8,14 @@ Tài liệu này mô tả các công nghệ, thư viện và quy ước được
 
 # Technology Stack
 
-| Thành phần | Công nghệ |
-|------------|-----------|
-| Frontend | React + Vite |
-| Backend | FastAPI (Python) |
-| Gateway | FastAPI + WebSocket + asyncio |
-| Agent | Python |
-| Database | SQLite |
-| Communication | WebSocket + JSON |
+| Thành phần    | Công nghệ                   |
+| ------------- | --------------------------- |
+| Frontend      | React + Vite                |
+| Backend       | FastAPI (Python)            |
+| Gateway       | Python asyncio + websockets |
+| Client App    | C# WPF                      |
+| Database      | SQLite                      |
+| Communication | WebSocket + JSON            |
 
 ---
 
@@ -30,14 +30,13 @@ Tài liệu này mô tả các công nghệ, thư viện và quy ước được
 - asyncio
 - pydantic
 
-## Agent
+## Client App
 
-- psutil
-- mss
-- opencv-python
-- pywin32
-- pynput
-- aiofiles
+- .NET / WPF
+- System.Diagnostics
+- Win32 API / Interop
+- System.Drawing
+- Windows Services / Native interop
 
 ## Frontend
 
@@ -53,15 +52,18 @@ Tài liệu này mô tả các công nghệ, thư viện và quy ước được
 ```text
 project/
 │
-├── web_app/
+├── client-app/
+│   └── RemoteControlClient/
 │
 ├── gateway/
 │
-├── agent/
+├── web-app/
+│   ├── backend/
+│   └── frontend/
 │
 ├── docs/
 │
-└── scripts/
+└── README.md
 ```
 
 ---
@@ -88,7 +90,7 @@ Mỗi thành phần có logger riêng.
 
 - Backend Log
 - Gateway Log
-- Agent Log
+- Client App Log
 
 ---
 
@@ -124,7 +126,7 @@ Có thể bổ sung:
 - Docker
 - RBAC
 - Multi-user
-- Remote Update Agent
+- Remote Update Client App
 
 ---
 

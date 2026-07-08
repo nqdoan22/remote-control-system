@@ -26,7 +26,7 @@ Hệ thống gồm ba thành phần chính:
 
 - Web App
 - Gateway
-- Agent
+- Client App
 
 Chi tiết thiết kế của từng thành phần được mô tả trong `system_architecture.md`.
 
@@ -100,6 +100,8 @@ Hệ thống phải hỗ trợ:
 ### Screenshot
 
 - Chụp ảnh màn hình hiện tại.
+
+Screenshot không yêu cầu xác nhận của End User.
 
 ### Live Screen
 
@@ -219,7 +221,7 @@ Các giả định của hệ thống:
 
 - Toàn bộ Machine sử dụng Windows.
 - Các Machine nằm trong cùng mạng LAN.
-- Agent đã được cài đặt trên Machine trước khi sử dụng.
+- Client App đã được cài đặt trên Machine trước khi sử dụng.
 
 ---
 
