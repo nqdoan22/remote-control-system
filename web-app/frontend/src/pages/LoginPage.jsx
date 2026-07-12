@@ -10,15 +10,15 @@ function LoginPage() {
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
+    e.preventDefault(); // Dòng 1: Bảo trình duyệt đứng im, không được tự ý tải lại trang web.
+    setError('');       // Dòng 2: Xóa sạch các thông báo lỗi cũ (nếu có) để chuẩn bị kiểm tra lượt mới.
+    setIsLoading(true); // Dòng 3: Bật trạng thái "Đang xử lý" (khóa các nút bấm lại để user không click phá hoại).
 
-    // BẢO MẬT: Kiểm tra dữ liệu đầu vào cơ bản ở client
+    // 🔒 BẢO MẬT: Kiểm tra dữ liệu đầu vào cơ bản ở client (Máy của người dùng)
     if (!username || !password) {
-      setError('Vui lòng nhập đầy đủ tài khoản và mật khẩu!');
-      setIsLoading(false);
-      return;
+      setError('Vui lòng nhập đầy đủ tài khoản và mật khẩu!'); // Dòng 4: Báo lỗi lên màn hình
+      setIsLoading(false);                                   // Dòng 5: Mở khóa nút bấm để user sửa lại
+      return;                                                // Dòng 6: DỪNG NGAY LẬP TỨC, không chạy code phía dưới nữa.
     }
 
     try {
