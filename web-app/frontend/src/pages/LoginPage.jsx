@@ -1,6 +1,7 @@
 // web-app/frontend/src/pages/LoginPage.jsx
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 
 function LoginPage() {
   const [username, setUsername] = useState('');
@@ -10,38 +11,39 @@ function LoginPage() {
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
-    e.preventDefault(); // Dòng 1: Bảo trình duyệt đứng im, không được tự ý tải lại trang web.
-    setError('');       // Dòng 2: Xóa sạch các thông báo lỗi cũ (nếu có) để chuẩn bị kiểm tra lượt mới.
-    setIsLoading(true); // Dòng 3: Bật trạng thái "Đang xử lý" (khóa các nút bấm lại để user không click phá hoại).
+  e.preventDefault();
+  setError('');
+  setIsLoading(true);
 
-    // 🔒 BẢO MẬT: Kiểm tra dữ liệu đầu vào cơ bản ở client (Máy của người dùng)
-    if (!username || !password) {
-      setError('Vui lòng nhập đầy đủ tài khoản và mật khẩu!'); // Dòng 4: Báo lỗi lên màn hình
-      setIsLoading(false);                                   // Dòng 5: Mở khóa nút bấm để user sửa lại
-      return;                                                // Dòng 6: DỪNG NGAY LẬP TỨC, không chạy code phía dưới nữa.
+  try {
+    // 🔗 GỌI API THẬT XUỐNG PYTHON BACKEND (Không dùng mock delay nữa)
+    const response = await axios.post('http://127.0.0.1:8000/api/auth/login', {
+      username,
+      password
+    });
+
+    // Nếu Backend trả về thành công (status 200)
+    if (response.data.status === 'success') {
+      // Lưu token thật và thông tin user thật vào localStorage
+      localStorage.setItem('token', response.data.token);
+      localStorage.setItem('user', JSON.stringify(response.data.user));
+      
+      // Chuyển hướng sang trang Dashboard
+      navigate('/dashboard');
     }
-
-    try {
-      // ⚠️ ĐOẠN NÀY LÀ MOCK DATA (GIẢ LẬP) ĐỂ BẠN TEST TRƯỚC UI
-      // Sau này khi làm Backend xong, ta sẽ thay đoạn này bằng axios.post('/api/auth/login')
-      await new Promise((resolve) => setTimeout(resolve, 1000)); // Giả lập delay mạng 1s
-
-      if (username === 'admin' && password === 'admin123') {
-        // Đăng nhập thành công -> Lưu token giả lập vào localStorage
-        localStorage.setItem('token', 'mock-jwt-token-xyz');
-        localStorage.setItem('user', JSON.stringify({ username: 'admin', role: 'root' }));
-        
-        // Chuyển hướng sang trang Dashboard
-        navigate('/dashboard');
-      } else {
-        setError('Tài khoản hoặc mật khẩu không chính xác!');
-      }
-    } catch (err) {
-      setError('Có lỗi xảy ra kết nối đến server. Vui lòng thử lại!');
-    } finally {
-      setIsLoading(false);
+  } catch (err) {
+    // Nếu có lỗi (Ví dụ: sai mật khẩu trả về 401, hoặc mất kết nối server)
+    if (err.response) {
+      // Lỗi do Backend phản hồi về (Sai tài khoản/mật khẩu)
+      setError(err.response.data.detail);
+    } else {
+      // Lỗi do không kết nối được tới Server (Sập Backend)
+      setError('Không thể kết nối đến máy chủ Backend. Vui lòng kiểm tra lại!');
     }
-  };
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   return (
     <div style={styles.container}>
