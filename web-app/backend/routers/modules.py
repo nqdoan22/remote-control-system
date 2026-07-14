@@ -23,24 +23,47 @@ class FileActionRequest(BaseModel):
     file_path: str
     action: str  # "download", "view", "delete"
 
+class AppActionRequest(BaseModel):
+    machine_id: str
+    app_name: str  # Tên file thực thi, VD: notepad.exe, calc.exe
+
+class BrowseDirectoryRequest(BaseModel):
+    machine_id: str
+    target_path: str
 
 # =====================================================================
 # 🛠️ ĐẦU NỐI CHI TIẾT ĐÃ ĐƯỢC BẢO MẬT (TẤT CẢ PHẢI QUADepends)
 # =====================================================================
 
 # 1️⃣ 📁 Applications: Xem danh sách phần mềm đang chạy
-@router.get("/applications/{machine_id}")
-async def get_applications(machine_id: str, current_user: str = Depends(get_current_user)):
+@router.post("/applications/start")
+async def start_application(data: AppActionRequest, current_user: str = Depends(get_current_user)):
     try:
-        agent_data = await gateway_client.send_command_and_wait(
-            machine_id=machine_id,
+        await gateway_client.send_command_and_wait(
+            machine_id=data.machine_id,
             module="applications",
-            action="list"
+            action="start",
+            payload={"app_name": data.app_name}
         )
         return {
             "status": "success",
-            "machine_id": machine_id,
-            "apps": agent_data.get("apps", [])
+            "message": f"Đã phát lệnh khởi chạy {data.app_name} trên máy {data.machine_id}."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/applications/stop")
+async def stop_application(data: AppActionRequest, current_user: str = Depends(get_current_user)):
+    try:
+        await gateway_client.send_command_and_wait(
+            machine_id=data.machine_id,
+            module="applications",
+            action="stop",
+            payload={"app_name": data.app_name}
+        )
+        return {
+            "status": "success",
+            "message": f"Đã phát lệnh đóng ứng dụng {data.app_name} trên máy {data.machine_id}."
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -102,19 +125,53 @@ async def get_keylogger(machine_id: str, current_user: str = Depends(get_current
 
 
 # 6️⃣ 📥 File Management: Thao tác file (Download/View/Delete)
-@router.post("/file-download/action")
-async def file_download_action(data: FileActionRequest, current_user: str = Depends(get_current_user)):
+@router.post("/file/browse")
+async def browse_directory(data: BrowseDirectoryRequest, current_user: str = Depends(get_current_user)):
+    """
+    Endpoint nhận yêu cầu từ Frontend để liệt kê tất cả file/thư mục bên trong một đường dẫn cụ thể.
+    """
     try:
+        # Gửi lệnh xuống Agent thông qua Gateway Client bằng cơ chế đồng bộ giả lập (Future)
         agent_data = await gateway_client.send_command_and_wait(
             machine_id=data.machine_id,
             module="file",
-            action=data.action,
-            payload={"file_path": data.file_path}
+            action="list_dir",
+            payload={"target_path": data.target_path}
         )
+        
+        # Trả về kết quả cho Frontend sau khi Agent đã quét xong ổ đĩa đích
         return {
             "status": "success",
-            "message": f"Đã gửi lệnh thực hiện hành động [{data.action.upper()}] tới file '{data.file_path}' trên máy {data.machine_id}.",
-            "data": agent_data
+            "current_path": agent_data.get("current_path", ""),
+            "files": agent_data.get("files", [])  # Mảng danh sách các file/thư mục
+        }
+    except Exception as e:
+        # Bắt toàn bộ lỗi hệ thống (Timeout, Mất kết nối Agent...) và trả về mã lỗi 500
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/file/download")
+async def download_file_content(data: FileActionRequest, current_user: str = Depends(get_current_user)):
+    """
+    Endpoint nhận yêu cầu tải một file cụ thể từ máy Agent về Web App.
+    """
+    # Ràng buộc bảo mật: Kiểm tra xem hành động gửi lên có đúng là đòi download không
+    if data.action != "download":
+        raise HTTPException(status_code=400, detail="Hành động không hợp lệ cho endpoint này!")
+        
+    try:
+        # Hạ lệnh cho Agent đọc file và chuyển đổi file đó thành dạng văn bản an toàn để truyền qua mạng
+        agent_data = await gateway_client.send_command_and_wait(
+            machine_id=data.machine_id,
+            module="file",
+            action="download",
+            payload={"file_path": data.file_path}
+        )
+        
+        return {
+            "status": "success",
+            "file_name": agent_data.get("file_name"),
+            # Dữ liệu file đã được mã hóa Base64 dạng chuỗi text để vận chuyển an toàn qua JSON
+            "file_base64": agent_data.get("file_base64") 
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
