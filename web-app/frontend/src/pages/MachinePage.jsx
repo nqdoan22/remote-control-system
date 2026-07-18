@@ -3,19 +3,16 @@ import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 
 // ==========================================
-// 📦 1. IMPORT CÁC MODULE ĐÃ HOÀN THÀNH VÀ SẴN SÀNG CHẠY
+// 📦 1. IMPORT CÁC MODULE CHÍNH THỨC CỦA ĐỒ ÁN
 // ==========================================
 import Applications from '../components/modules/Applications'; // 🚀 Tab 1: Ứng dụng
 import ProcessesManager from '../components/modules/Processes'; // 📊 Tab 2: Tiến trình System
-import Screenshot from '../components/modules/Screenshot';       // 📸 Tab 3: Chụp màn hình (HTTP)
-import LiveScreen from '../components/modules/LiveScreen';       // 📺 Tab 4: Livestream màn hình (WS)
-import WebcamMonitor from '../components/modules/Webcam';         // 📷 Tab 5: Giám sát Webcam (WS)
-
-// 🌟 MỚI: Kích hoạt nạp các Component tương ứng với file có sẵn trong cây thư mục của bạn
+import Screenshot from '../components/modules/Screenshot';       // 📸 Tab 3: Chụp màn hình
+import LiveScreen from '../components/modules/LiveScreen';       // 📺 Tab 4: Livestream màn hình
+import WebcamMonitor from '../components/modules/Webcam';         // 📷 Tab 5: Giám sát Webcam
 import KeyLogger from '../components/modules/KeyLogger';         // ⌨️ Tab 6: Nhật ký gõ phím
 import FileDownload from '../components/modules/FileDownload';   // 📁 Tab 7: Quản lý tập tin từ xa
-
-import PowerControl from '../components/modules/PowerControl';   // 🔌 Tab 9: Tắt/Khởi động/Khóa máy
+import PowerControl from '../components/modules/PowerControl';   // 🔌 Tab 8: Điều khiển nguồn
 
 function MachinePage() {
   // id được lấy từ URL (Ví dụ: /machine/agent_01 -> id sẽ là "agent_01")
@@ -26,7 +23,7 @@ function MachinePage() {
   const [activeTab, setActiveTab] = useState('processes');
 
   // ==========================================
-  // 📋 2. CẤU HÌNH DANH SÁCH MENU ĐIỀU KHIỂN (SIDEBAR)
+  // 📋 2. CẤU HÌNH DANH SÁCH MENU ĐIỀU KHIỂN (SIDEBAR) - ĐÃ CẮT BỚT TÍNH NĂNG DƯ THỪA
   // ==========================================
   const menuItems = [
     { id: 'apps', label: '1. Danh Sách Ứng Dụng', desc: 'Quét phần mềm hệ thống' },
@@ -34,11 +31,9 @@ function MachinePage() {
     { id: 'screenshot', label: '3. Chụp Màn Hình', desc: 'Bản chụp ảnh từ xa (Base64)' },
     { id: 'live-screen', label: '4. Xem Trực Tiếp', desc: 'Luồng livestream màn hình' },
     { id: 'webcam', label: '5. Giám Sát Webcam', desc: 'Truyền phát camera thời gian thực' },
-    { id: 'keylogger', label: '6. Nhật Ký Bàn Phím', desc: 'Theo dõi phím gõ ngầm trên RAM' }, // 🌟 Đã mở khóa
-    { id: 'files', label: '7. Quản Lý Tập Tin', desc: 'Xem, tải xuống, xóa file an toàn' },       // 🌟 Đã mở khóa
-    { id: 'hardware', label: '8. Phần Cứng & Registry', desc: 'Thông số RAM, CPU & Registry' },
-    { id: 'power', label: '9. Điều Khiển Nguồn', desc: 'Tắt nguồn, khởi động, khóa máy' },
-    { id: 'audio-monitor', label: '🎧 Giám Sát Âm Thanh', desc: 'Thu âm micro (Phát triển thêm)', isSub: true }
+    { id: 'keylogger', label: '6. Nhật Ký Bàn Phím', desc: 'Theo dõi phím gõ ngầm trên RAM' },
+    { id: 'files', label: '7. Quản Lý Tập Tin', desc: 'Xem, tải xuống, xóa file an toàn' },
+    { id: 'power', label: '8. Điều Khiển Nguồn', desc: 'Tắt nguồn, khởi động, khóa máy' }
   ];
 
   // ==========================================
@@ -61,7 +56,6 @@ function MachinePage() {
       case 'webcam':
         return <WebcamMonitor machineId={id} />;
         
-      // 🌟 KÍCH HOẠT THÀNH CÔNG: Đưa cấu trúc dữ liệu thực tế vào thay thế placeholder cũ
       case 'keylogger':
         return <KeyLogger machineId={id} />;
         
@@ -70,25 +64,6 @@ function MachinePage() {
         
       case 'power':
         return <PowerControl machineId={id} />;
-
-      // --- ⏳ CÁC TÍNH NĂNG CHƯA CÓ FILE TRÊN THƯ MỤC CỨNG ---
-      case 'hardware':
-        return (
-          <div style={styles.placeholderContainer}>
-            <div style={styles.placeholderIcon}>⚙️</div>
-            <h3 style={styles.placeholderTitle}>Module Đang Được Xây Dựng</h3>
-            <p style={styles.placeholderDesc}>Giao diện Registry và cấu hình phần cứng đang được tích hợp hạ tầng hệ thống.</p>
-          </div>
-        );
-        
-      case 'audio-monitor':
-        return (
-          <div style={{...styles.placeholderContainer, borderStyle: 'dashed', backgroundColor: '#fff5f7'}}>
-            <div style={{...styles.placeholderIcon, color: '#ec4899'}}>🎧</div>
-            <h3 style={styles.placeholderTitle}>Audio Monitor (Tính năng phụ)</h3>
-            <p style={styles.placeholderDesc}>Hệ thống đã bọc lót sẵn cấu trúc hạ tầng nhận diện âm thanh mạng LAN.</p>
-          </div>
-        );
         
       default:
         return <div style={styles.message}>Không tìm thấy tính năng yêu cầu.</div>;
@@ -118,14 +93,14 @@ function MachinePage() {
           <div style={styles.sidebarTitle}>DANH MỤC CHỨC NĂNG</div>
           <div style={styles.menuList}>
             {menuItems.map((item) => {
-              const isActive = activeTab === item.id; // Kiểm tra xem nút này có đang được chọn không
+              const isActive = activeTab === item.id;
               return (
                 <button
                   key={item.id}
-                  onClick={() => setActiveTab(item.id)} // Khi click sẽ thay đổi state activeTab để đổi màn hình bên phải
+                  onClick={() => setActiveTab(item.id)}
                   style={{
                     ...styles.menuItem,
-                    backgroundColor: isActive ? '#2563eb' : item.isSub ? '#fdf2f8' : 'white',
+                    backgroundColor: isActive ? '#2563eb' : 'white',
                     color: isActive ? 'white' : '#1e293b',
                     borderColor: isActive ? '#2563eb' : '#e2e8f0',
                   }}
@@ -142,7 +117,7 @@ function MachinePage() {
 
         {/* 📺 MÀN HÌNH HIỂN THỊ NỘI DUNG CHI TIẾT BÊN PHẢI */}
         <main style={styles.mainContent}>
-          {renderModuleContent()} {/* Gọi hàm kiểm tra switch-case ở trên để vẽ giao diện */}
+          {renderModuleContent()}
         </main>
       </div>
     </div>
@@ -166,10 +141,6 @@ const styles = {
   menuList: { display: 'flex', flexDirection: 'column', gap: '0.5rem' },
   menuItem: { width: '100%', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s', display: 'flex', flexDirection: 'column' },
   mainContent: { flex: 1, padding: '2rem', overflowY: 'auto' },
-  placeholderContainer: { backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '4rem 2rem', textAlign: 'center', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', maxWidth: '600px', margin: '2rem auto' },
-  placeholderIcon: { fontSize: '2.5rem', margin: '0 auto 1rem', color: '#3b82f6', width: 'fit-content' },
-  placeholderTitle: { margin: '0 0 0.5rem 0', fontSize: '1.2rem', color: '#1e293b', fontWeight: 'bold' },
-  placeholderDesc: { margin: 0, fontSize: '0.875rem', color: '#64748b', lineHeight: '1.6' },
   message: { textAlign: 'center', padding: '3rem', fontSize: '1.1rem', color: '#64748b', fontWeight: '500' }
 };
 
