@@ -5,25 +5,25 @@ import { useParams, useNavigate } from 'react-router-dom';
 // ==========================================
 // 📦 1. IMPORT CÁC MODULE CHÍNH THỨC CỦA ĐỒ ÁN
 // ==========================================
-import Applications from '../components/modules/Applications'; // 🚀 Tab 1: Ứng dụng
-import ProcessesManager from '../components/modules/Processes'; // 📊 Tab 2: Tiến trình System
-import Screenshot from '../components/modules/Screenshot';       // 📸 Tab 3: Chụp màn hình
-import LiveScreen from '../components/modules/LiveScreen';       // 📺 Tab 4: Livestream màn hình
-import WebcamMonitor from '../components/modules/Webcam';         // 📷 Tab 5: Giám sát Webcam
-import KeyLogger from '../components/modules/KeyLogger';         // ⌨️ Tab 6: Nhật ký gõ phím
-import FileDownload from '../components/modules/FileDownload';   // 📁 Tab 7: Quản lý tập tin từ xa
-import PowerControl from '../components/modules/PowerControl';   // 🔌 Tab 8: Điều khiển nguồn
+import Applications from '../components/modules/Applications'; // 🚀 Tab 1
+import ProcessesManager from '../components/modules/Processes'; // 📊 Tab 2
+import Screenshot from '../components/modules/Screenshot';      // 📸 Tab 3
+import LiveScreen from '../components/modules/LiveScreen';      // 📺 Tab 4
+import WebcamMonitor from '../components/modules/Webcam';        // 📷 Tab 5
+import KeyLogger from '../components/modules/KeyLogger';        // ⌨️ Tab 6
+import FileDownload from '../components/modules/FileDownload';   // 📁 Tab 7
+import PowerControl from '../components/modules/PowerControl';   // 🔌 Tab 8
 
 function MachinePage() {
-  // id được lấy từ URL (Ví dụ: /machine/agent_01 -> id sẽ là "agent_01")
-  const { id } = useParams();
+  // 🔄 ĐỒNG BỘ: Lấy đúng tên tham số "machineId" như đã khai báo trong App.jsx
+  const { machineId } = useParams(); 
   const navigate = useNavigate();
 
-  // Quản lý Tab nào đang hiển thị dữ liệu trên màn hình, mặc định vào sẽ mở tab Tiến trình
+  // Mặc định vào sẽ mở tab Tiến trình (processes)
   const [activeTab, setActiveTab] = useState('processes');
 
   // ==========================================
-  // 📋 2. CẤU HÌNH DANH SÁCH MENU ĐIỀU KHIỂN (SIDEBAR) - ĐÃ CẮT BỚT TÍNH NĂNG DƯ THỪA
+  // 📋 2. CẤU HÌNH DANH SÁCH MENU ĐIỀU KHIỂN (SIDEBAR)
   // ==========================================
   const menuItems = [
     { id: 'apps', label: '1. Danh Sách Ứng Dụng', desc: 'Quét phần mềm hệ thống' },
@@ -40,31 +40,24 @@ function MachinePage() {
   // ⚙️ 3. BỘ ĐỊNH TUYẾN NỘI BỘ (RENDER CONTROLLER)
   // ==========================================
   const renderModuleContent = () => {
+    // 🔄 ĐỒNG BỘ: Truyền biến machineId vào prop machineId của tất cả module con
     switch (activeTab) {
       case 'apps':
-        return <Applications machineId={id} />;
-        
+        return <Applications machineId={machineId} />;
       case 'processes':
-        return <ProcessesManager machineId={id} />;
-        
+        return <ProcessesManager machineId={machineId} />;
       case 'screenshot':
-        return <Screenshot machineId={id} />;
-        
+        return <Screenshot machineId={machineId} />;
       case 'live-screen':
-        return <LiveScreen machineId={id} />;
-        
+        return <LiveScreen machineId={machineId} />;
       case 'webcam':
-        return <WebcamMonitor machineId={id} />;
-        
+        return <WebcamMonitor machineId={machineId} />;
       case 'keylogger':
-        return <KeyLogger machineId={id} />;
-        
+        return <KeyLogger machineId={machineId} />;
       case 'files':
-        return <FileDownload machineId={id} />;
-        
+        return <FileDownload machineId={machineId} />;
       case 'power':
-        return <PowerControl machineId={id} />;
-        
+        return <PowerControl machineId={machineId} />;
       default:
         return <div style={styles.message}>Không tìm thấy tính năng yêu cầu.</div>;
     }
@@ -82,7 +75,8 @@ function MachinePage() {
           <h2 style={styles.logo}>⚙️ Bảng Điều Khiển Thiết Bị</h2>
         </div>
         <div style={styles.navRight}>
-          <span style={styles.machineBadge}>MÁY MỤC TIÊU: <strong style={{fontFamily: 'monospace'}}>{id}</strong></span>
+          {/* Hiển thị machineId lên giao diện */}
+          <span style={styles.machineBadge}>MÁY MỤC TIÊU: <strong style={{fontFamily: 'monospace'}}>{machineId}</strong></span>
         </div>
       </nav>
 

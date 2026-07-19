@@ -6,29 +6,28 @@ import uuid
 import time
 
 class GatewayClient:
-    """Quản lý kết nối từ Web App Backend tới Gateway qua WebSocket chuẩn hóa."""
+    """Quản lý kết nối từ Web App Backend tới Gateway."""
 
     def __init__(self, gateway_url: str):
         self.gateway_url = gateway_url
         self.websocket = None
-        self.pending_responses = {}  # Lưu trữ các request đang đợi Agent trả lời bằng messageId
+        self.pending_responses = {} 
         self.listen_task = None
 
     async def connect(self):
-        """Thiết lập kết nối và chạy loop lắng nghe dữ liệu trả về từ Gateway."""
         try:
+            # Backend Web App kết nối tới Gateway qua endpoint /webapp
             self.websocket = await websockets.connect(f"{self.gateway_url}/webapp")
-            print(f"🔌 Connected to Gateway at {self.gateway_url}")
             self.listen_task = asyncio.create_task(self._listen_loop())
         except Exception as e:
-            print(f"❌ Failed to connect to Gateway: {e}")
+            print(f"❌ Kết nối Gateway thất bại: {e}")
 
     async def _listen_loop(self):
-        """Vòng lặp lắng nghe liên tục phản hồi từ Gateway theo chuẩn Protocol mới."""
+        """Vòng lặp lắng nghe phản hồi."""
         try:
             async for message in self.websocket:
                 response_data = json.loads(message)
-                # Đọc định danh theo chuẩn trường messageId mới (camelCase)
+                # Đọc định danh theo chuẩn camelCase của Protocol: messageId[cite: 15, 18].
                 msg_id = response_data.get("messageId")
                 
                 if msg_id and msg_id in self.pending_responses:
@@ -36,24 +35,22 @@ class GatewayClient:
                     if not future.done():
                         future.set_result(response_data)
         except websockets.exceptions.ConnectionClosed:
-            print("🔌 Connection to Gateway closed.")
+            pass
 
     async def send_command_and_wait(self, machine_id: str, msg_type: str, payload: dict = {}, timeout: int = 10):
-        """Gửi lệnh xuống một máy theo đúng cấu trúc JSON quy định trong tài liệu thiết kế."""
         if not self.websocket:
             raise Exception("Chưa kết nối tới Gateway WebSocket!")
 
-        # Tạo messageId duy nhất theo chuẩn cấu trúc chung
         message_id = str(uuid.uuid4())
         
-        # Thiết lập gói tin tuân thủ tuyệt đối quy ước đặt tên trường camelCase và cấu trúc Protocol
+        # Thiết lập gói tin tuân thủ cấu trúc chuẩn: messageId, type, timestamp, source, destination, payload[cite: 18].
         message = {
             "messageId": message_id,
-            "type": msg_type,           # Định dạng dạng "module.action"
+            "type": msg_type,           # Tên message sử dụng quy tắc module.action[cite: 18].
             "timestamp": int(time.time()),
-            "source": "webapp",
-            "destination": machine_id,  # Máy đích nhận lệnh
-            "payload": payload          # Dữ liệu đi kèm lệnh
+            "source": "webapp",         # Nguồn gửi là webapp[cite: 18].
+            "destination": machine_id,  # Đích đến là machine_id của Client App[cite: 18].
+            "payload": payload
         }
 
         loop = asyncio.get_running_loop()
@@ -61,24 +58,19 @@ class GatewayClient:
         self.pending_responses[message_id] = future
 
         try:
-            # Truyền gói tin qua mạng LAN xuống Gateway
             await self.websocket.send(json.dumps(message))
-            
-            # Chờ Agent phản hồi trong giới hạn giây (timeout)
             response = await asyncio.wait_for(future, timeout=timeout)
             
-            # TƯ DUY BẢO MẬT: Xử lý và bóc tách lỗi hệ thống chuẩn hóa nếu đầu Agent/Gateway từ chối
+            # Xử lý các mã lỗi hệ thống (Standard Error Codes) như PERMISSION_DENIED, TIMEOUT[cite: 18].
             if response.get("type") == "error":
                 err_payload = response.get("payload", {})
                 raise Exception(f"[{err_payload.get('code')}] {err_payload.get('message')}")
                 
-            return response.get("payload", {})  # Trả về payload kết quả cho router xử lý
+            return response.get("payload", {})
         
         except asyncio.TimeoutError:
-            raise Exception(f"⏰ Hết thời gian chờ phản hồi (Timeout) cho lệnh [{msg_type}] tới máy {machine_id}")
+            raise Exception(f"⏰ Lỗi TIMEOUT: Hết thời gian chờ phản hồi[cite: 18].")
         finally:
-            # Dọn dẹp RAM lưu trữ bộ đệm Future
             self.pending_responses.pop(message_id, None)
 
-# Khởi tạo instance dùng chung cho toàn bộ app backend
 gateway_client = GatewayClient("ws://localhost:8765")

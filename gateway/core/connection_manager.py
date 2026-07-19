@@ -7,61 +7,54 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger("Gateway.ConnectionManager")
 
 class ConnectionManager:
-    """Quản lý tập trung các kết nối vật lý WebSocket trong mạng LAN."""
+    """Gateway là trung tâm giao tiếp, quản lý toàn bộ kết nối WebSocket[cite: 14, 16]."""
     
     def __init__(self):
-        # Lưu các máy trạm: { machine_id: {"websocket": ws, "last_seen": timestamp, "status": "online"} }
+        # Lưu các máy trạm, phục vụ Machine Registry[cite: 16].
         self.active_agents = {}
-        # Lưu kết nối từ Web App Backend (hỗ trợ nhiều kết nối nếu Web App mở rộng)
         self.webapp_connections = set()
 
     async def register_webapp(self, websocket):
-        """Đăng ký kết nối từ Web App Backend."""
         self.webapp_connections.add(websocket)
-        logger.info(f"🟢 Web App Backend đã kết nối vào Gateway. Tổng số: {len(self.webapp_connections)}")
 
     async def unregister_webapp(self, websocket):
-        """Hủy đăng ký kết nối Web App khi ngắt socket."""
         if websocket in self.webapp_connections:
             self.webapp_connections.remove(websocket)
-            logger.info("🛑 Web App Backend đã ngắt kết nối khỏi Gateway.")
 
     async def register_agent(self, machine_id: str, websocket):
-        """Đăng ký thiết bị Agent sau khi xác thực thành công."""
+        # Client App phải được xác thực trước khi tham gia vào Machine Registry[cite: 14, 18].
         self.active_agents[machine_id] = {
             "websocket": websocket,
             "last_seen": time.time(),
-            "status": "online"
+            "status": "online" # Hệ thống phải hiển thị trạng thái Online/Offline[cite: 13, 14].
         }
-        logger.info(f"🖥️ Agent [{machine_id}] đăng ký thành công vào hệ thống.")
         await self.broadcast_status_to_webapp(machine_id, "online")
 
     async def unregister_agent(self, machine_id: str):
-        """Loại bỏ Agent khỏi Registry khi mất kết nối."""
         if machine_id in self.active_agents:
             self.active_agents.pop(machine_id)
-            logger.warn(f"💥 Agent [{machine_id}] đã mất kết nối hoặc bị ngắt bỏ.")
             await self.broadcast_status_to_webapp(machine_id, "offline")
 
     def update_heartbeat(self, machine_id: str):
-        """Cập nhật thời gian tương tác cuối cùng để tính toán trạng thái Live/Dead."""
+        # Gateway giám sát trạng thái kết nối thông qua Heartbeat để cập nhật Online/Offline[cite: 17, 18].
         if machine_id in self.active_agents:
             self.active_agents[machine_id]["last_seen"] = time.time()
-            logger.debug(f"💓 Nhận Heartbeat từ {machine_id}")
 
     def get_agent_socket(self, machine_id: str):
-        """Lấy socket vật lý để gửi lệnh."""
         agent_info = self.active_agents.get(machine_id)
         if agent_info and agent_info["status"] == "online":
             return agent_info["websocket"]
         return None
 
     async def broadcast_status_to_webapp(self, machine_id: str, status: str):
-        """Thông báo thời gian thực về Web App khi có máy Online/Offline."""
+        # Bắn Event thông báo trạng thái Machine về Web App bằng cấu trúc chuẩn[cite: 18].
         import json
         notification = {
+            "messageId": f"evt-{int(time.time())}",
             "type": "machine.status_change",
             "timestamp": int(time.time()),
+            "source": "gateway",
+            "destination": "webapp",
             "payload": {
                 "machineId": machine_id,
                 "status": status

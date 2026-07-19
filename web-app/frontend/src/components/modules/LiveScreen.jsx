@@ -2,52 +2,52 @@
 import React, { useState, useEffect, useRef } from 'react';
 
 function LiveScreen({ machineId }) {
-  // --- 🧠 1. QUẢN LÝ TRẠNG THÁI VÀ BỘ NHỚ TẠM ---
-  
-  // Trạng thái hệ thống: Đang kết nối, Đã kết nối (Đang stream), hoặc Bị lỗi
   const [status, setStatus] = useState('disconnected'); 
-  
-  // Nơi chứa dữ liệu ảnh Base64 mới nhất để hiển thị lên màn hình
   const [imageSrc, setImageSrc] = useState(null); 
-  
-  // useRef: Đóng vai trò như một "cái neo" giữ kết nối WebSocket không bị mất 
-  // khi React vẽ lại giao diện. Nó không làm màn hình chớp giật như useState.
   const wsRef = useRef(null); 
 
-  // --- 🔄 2. HÀM KHỞI TẠO LUỒNG KẾT NỐI (WEBSOCKET CLIENT) ---
   const startStream = () => {
     setStatus('connecting');
 
     try {
-      // ⚠️ LƯU Ý MẠNG: Khác với http://, WebSocket bắt đầu bằng ws:// (hoặc wss:// nếu có mã hóa SSL)
-      // Địa chỉ này trỏ thẳng tới cổng WebSocket mở riêng trên Backend FastAPI của bạn
       const wsUrl = `ws://localhost:8000/api/ws/livestream/${machineId}`;
-      
-      // Tạo một đường ống mạng nối thẳng từ Trình duyệt (Frontend) đến Backend
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
-      // SỰ KIỆN A: Khi đường ống được kết nối thành công
       ws.onopen = () => {
         setStatus('streaming');
-        // Lúc này, Backend sẽ tự hiểu và ra lệnh cho Agent: "Bắt đầu chụp ảnh liên tục đi!"
+        // Đồng bộ hóa gửi tin nhắn kích hoạt Command lên Gateway
+        const startMessage = {
+          messageId: crypto.randomUUID(),
+          type: "screen.live.start",
+          timestamp: Math.floor(Date.now() / 1000),
+          source: "web-app",
+          destination: machineId,
+          payload: {}
+        };
+        ws.send(JSON.stringify(startMessage));
       };
 
-      // SỰ KIỆN B: Khi đường ống nhận được "hàng" (Gói tin từ Backend gửi tới)
+      // Xử lý thông điệp JSON gói tin từ dữ liệu phân tuyến của Gateway
       ws.onmessage = (event) => {
-        // event.data chính là chuỗi mã hóa Base64 của 1 khung hình (1 tấm ảnh)
-        // Ta nối thêm tiền tố "data:image/jpeg;base64," để Trình duyệt hiểu đây là một bức ảnh
-        const frameData = `data:image/jpeg;base64,${event.data}`;
-        setImageSrc(frameData); // Cập nhật hình ảnh lên UI ngay lập tức
+        try {
+          const message = JSON.parse(event.data);
+          
+          // Kiểm tra đúng loại tin nhắn đồng bộ theo quy ước đặt tên: module.action
+          if (message.type === 'screen.live.frame' && message.payload?.frame) {
+            const frameData = `data:image/jpeg;base64,${message.payload.frame}`;
+            setImageSrc(frameData); 
+          }
+        } catch (err) {
+          console.error("Gói tin không khớp định dạng thiết kế JSON tổng quát:", err);
+        }
       };
 
-      // SỰ KIỆN C: Khi đường ống bị đứt ngầm hoặc lỗi mạng LAN
       ws.onerror = (error) => {
         console.error("Lỗi luồng WebSocket:", error);
         setStatus('error');
       };
 
-      // SỰ KIỆN D: Khi kết nối bị đóng lại (do người dùng tắt hoặc Agent sập nguồn)
       ws.onclose = () => {
         setStatus('disconnected');
       };
@@ -58,32 +58,33 @@ function LiveScreen({ machineId }) {
     }
   };
 
-  // --- 🛑 3. HÀM ĐÓNG LUỒNG KẾT NỐI ---
   const stopStream = () => {
-    // Nếu đường ống đang tồn tại và đang mở, ta tiến hành bóp nghẹt (đóng) nó lại
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.close(); // Gửi tín hiệu đóng lên Backend
+      // Gửi lệnh đóng stream có cấu trúc trước khi ngắt socket vật lý
+      const stopMessage = {
+        messageId: crypto.randomUUID(),
+        type: "screen.live.stop",
+        timestamp: Math.floor(Date.now() / 1000),
+        source: "web-app",
+        destination: machineId,
+        payload: {}
+      };
+      wsRef.current.send(JSON.stringify(stopMessage));
+      wsRef.current.close(); 
       wsRef.current = null;
     }
     setStatus('disconnected');
-    setImageSrc(null); // Xóa khung hình cuối cùng còn lưu trên màn hình
+    setImageSrc(null); 
   };
 
-  // --- 🧹 4. DỌN DẸP BỘ NHỚ KHI CHUYỂN TAB ---
-  // Rất quan trọng: Nếu người dùng đang xem stream mà bấm sang tab "Quản lý File",
-  // ta phải tự động cắt đứt luồng stream, nếu không máy Agent sẽ bị vắt kiệt CPU.
   useEffect(() => {
-    return () => {
-      stopStream(); // Hàm chạy khi Component bị tháo gỡ (Unmount)
-    };
+    return () => { stopStream(); };
   }, []);
 
-  // --- 🖼️ GIAO DIỆN HIỂN THỊ (RÚT GỌN CSS) ---
   return (
     <div style={{ padding: '1rem', display: 'flex', flexDirection: 'column', height: '100%' }}>
       <h2>📺 Luồng Giám Sát Màn Hình (Real-time Stream)</h2>
       
-      {/* 🎮 KHU VỰC ĐIỀU KHIỂN */}
       <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
         {status === 'disconnected' || status === 'error' ? (
           <button onClick={startStream} style={styles.btnStart}>
@@ -95,20 +96,17 @@ function LiveScreen({ machineId }) {
           </button>
         )}
 
-        {/* Đèn tín hiệu mạng */}
         <span style={{ fontWeight: 'bold', color: status === 'streaming' ? '#10b981' : (status === 'connecting' ? '#f59e0b' : '#ef4444') }}>
-          {status === 'streaming' ? '🟢 KẾT NỐI ỔN ĐỊNH' : status === 'connecting' ? '🟡 ĐANG THIẾT LẬP ĐƯỜNG TRUYỀN...' : '🔴 ĐÃ NGẮT KẾT NỐI'}
+          {status === 'streaming' ? '🟢 KẾT NỐI ỔN ĐỊNH' : status === 'connecting' ? '🟡 ĐANG XÁC THỰC QUYỀN TRUY CẬP...' : '🔴 ĐÃ NGẮT KẾT NỐI'}
         </span>
       </div>
 
-      {/* 🖥️ KHU VỰC MÀN HÌNH HIỂN THỊ */}
       <div style={styles.screenContainer}>
         {imageSrc ? (
-          // Kỹ thuật Data URI: Nhét thẳng chuỗi Base64 vào thuộc tính src của thẻ img
           <img src={imageSrc} alt="Live Screen" style={styles.screenImage} />
         ) : (
           <div style={styles.placeholder}>
-            {status === 'connecting' ? 'Đang chờ khung hình đầu tiên...' : 'Màn hình đang tắt. Bấm bắt đầu để xem.'}
+            {status === 'connecting' ? 'Đang chờ khung hình xác nhận từ End User...' : 'Màn hình đang tắt. Bấm bắt đầu để xem.'}
           </div>
         )}
       </div>
@@ -116,7 +114,6 @@ function LiveScreen({ machineId }) {
   );
 }
 
-// CSS tối giản để màn hình trông giống một chiếc TV
 const styles = {
   btnStart: { backgroundColor: '#2563eb', color: 'white', padding: '0.5rem 1rem', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
   btnStop: { backgroundColor: '#ef4444', color: 'white', padding: '0.5rem 1rem', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
