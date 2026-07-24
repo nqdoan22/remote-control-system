@@ -32,16 +32,19 @@ Tài liệu này mô tả các công nghệ, thư viện và quy ước được
 
 ## Client App
 
-- .NET / WPF
-- System.Diagnostics
-- Win32 API / Interop
-- System.Drawing
-- Windows Services / Native interop
+- .NET 8 / WPF
+- `System.Diagnostics` — quản lý process và application
+- `System.Drawing` / `System.Drawing.Imaging` — chụp ảnh màn hình (screenshot, live screen)
+- `System.Net.WebSockets` — kết nối WebSocket tới Gateway
+- `System.Text.Json` — serialize/deserialize JSON message
+- `AForge.Video` / `AForge.Video.DirectShow` — capture webcam
+- `Gma.System.MouseKeyHook` — keylogger (hook bàn phím)
+- Win32 API / PInvoke — lock screen, power control (shutdown, restart, sleep)
 
 ## Frontend
 
-- React
-- React Router
+- React 18
+- React Router v6
 - Axios
 - TailwindCSS
 
@@ -72,15 +75,21 @@ project/
 
 ## Naming
 
-- File: snake_case
-- Class: PascalCase
-- Function: snake_case
-- Variable: snake_case
+| Scope | Convention | Ví dụ |
+|---|---|---|
+| File (Python) | snake_case | `auth_manager.py` |
+| File (C#) | PascalCase | `PermissionService.cs` |
+| File (JS/TS) | camelCase | `machineService.ts` |
+| Class | PascalCase | `MessageRouter` |
+| Function / Method (Python) | snake_case | `validate_token()` |
+| Function / Method (C#) | PascalCase | `SendHeartbeat()` |
+| Variable | snake_case (Python), camelCase (C#/JS) | |
 
 ## Communication
 
-- JSON
-- camelCase cho field trong message.
+- Tất cả message sử dụng JSON.
+- Tất cả field trong JSON message dùng **camelCase**.
+- Message type dùng quy tắc `module.action` (xem `communication_protocol.md`).
 
 ---
 
@@ -137,3 +146,4 @@ Có thể bổ sung:
 - system_architecture.md
 - communication_protocol.md
 - security_design.md
+- **api_contract.md** — message contract và payload spec

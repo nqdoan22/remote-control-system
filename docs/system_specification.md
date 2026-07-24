@@ -57,6 +57,18 @@ End User có quyền:
 
 ---
 
+# Sensitive Feature Policy
+
+> **Single source:** Danh sách đầy đủ các chức năng nhạy cảm và message types tương ứng được định nghĩa tại `api_contract.md` — **Sensitive Feature List**.
+
+Nguyên tắc chung:
+
+- Mọi chức năng trong Sensitive Feature List đều yêu cầu End User xác nhận **trước** khi thực hiện.
+- Nếu End User từ chối hoặc không phản hồi trong 30 giây, lệnh bị hủy và Administrator nhận thông báo lỗi.
+- Các chức năng không có trong danh sách đó **không** yêu cầu xác nhận.
+
+---
+
 # Functional Specification
 
 ## Machine Management
@@ -100,14 +112,12 @@ Hệ thống phải hỗ trợ:
 ### Screenshot
 
 - Chụp ảnh màn hình hiện tại.
-
-Screenshot không yêu cầu xác nhận của End User.
+- Không yêu cầu xác nhận của End User.
 
 ### Live Screen
 
 - Xem trực tiếp màn hình của Machine.
-
-Live Screen chỉ được phép bắt đầu sau khi End User xác nhận.
+- Yêu cầu xác nhận của End User (xem **Sensitive Feature Policy**).
 
 ---
 
@@ -120,8 +130,8 @@ Hệ thống phải hỗ trợ:
 
 Yêu cầu:
 
-- End User phải xác nhận trước khi sử dụng.
-- Machine phải hiển thị chỉ báo webcam đang hoạt động.
+- End User phải xác nhận trước khi sử dụng (xem **Sensitive Feature Policy**).
+- Machine phải hiển thị chỉ báo webcam đang hoạt động trong suốt thời gian sử dụng.
 
 ---
 
@@ -134,7 +144,7 @@ Hệ thống phải hỗ trợ:
 
 Yêu cầu:
 
-- End User phải xác nhận trước khi sử dụng.
+- End User phải xác nhận trước khi sử dụng (xem **Sensitive Feature Policy**).
 
 ---
 
@@ -144,8 +154,13 @@ Hệ thống phải hỗ trợ:
 
 - Upload File.
 - Download File.
+- Liệt kê nội dung thư mục sandbox.
 
-Việc truy cập tệp chỉ được phép trong thư mục đã cấu hình.
+Ràng buộc:
+
+- Chỉ được phép thao tác trong sandbox folder (mặc định: `C:\RemoteControl\`).
+- Kích thước file tối đa: **50 MB**.
+- Truy cập ngoài sandbox trả về lỗi `INVALID_PATH`.
 
 ---
 
@@ -160,7 +175,7 @@ Hệ thống phải hỗ trợ:
 
 Yêu cầu:
 
-- End User phải xác nhận trước khi thực hiện.
+- End User phải xác nhận trước khi thực hiện (xem **Sensitive Feature Policy**).
 
 ---
 
@@ -171,8 +186,11 @@ Hệ thống phải lưu lại:
 - Thời gian thực hiện.
 - Administrator thực hiện.
 - Machine được điều khiển.
-- Loại thao tác.
-- Kết quả thực hiện.
+- Loại thao tác (message type).
+- Kết quả thực hiện (success / failed).
+- Mã lỗi nếu thất bại.
+
+Audit Log do Web App backend ghi vào SQLite. Schema chi tiết xem tại `security_design.md`.
 
 ---
 
@@ -244,4 +262,5 @@ Các nội dung trên được mô tả trong các tài liệu liên quan.
 - system_architecture.md
 - communication_protocol.md
 - security_design.md
-- tech_stack.md
+- TECH_STACK.md
+- **api_contract.md** — Sensitive Feature List, message payload spec

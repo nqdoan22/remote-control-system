@@ -65,7 +65,18 @@ Mỗi Trust Boundary yêu cầu cơ chế xác thực riêng trước khi cho ph
 
 ## Administrator Authentication
 
-Administrator phải đăng nhập trước khi sử dụng hệ thống.
+Administrator đăng nhập qua Web App backend bằng username/password.
+
+Backend xác thực và cấp **JWT token** với thông tin:
+
+| Field | Value |
+|---|---|
+| Algorithm | HS256 |
+| Payload fields | `sub` (username), `iat` (issued at), `exp` (expiry) |
+| Expiry | 8 giờ |
+| Secret | Lưu trong `.env` — `JWT_SECRET` |
+
+JWT token này được Web App gửi lên Gateway khi thiết lập kết nối WebSocket (message `auth.webapp`).
 
 Sau khi xác thực thành công:
 
@@ -79,18 +90,36 @@ Sau khi xác thực thành công:
 
 Gateway chỉ chấp nhận kết nối từ Web App đã được xác thực.
 
-Các kết nối không hợp lệ sẽ bị từ chối.
+Flow:
+
+```text
+1. Web App kết nối WebSocket tới Gateway
+2. Web App gửi auth.webapp { token: "<jwt>" }
+3. Gateway validate JWT bằng JWT_SECRET
+4. Nếu hợp lệ → chấp nhận kết nối
+5. Nếu không hợp lệ → trả AUTHENTICATION_FAILED, đóng kết nối
+```
 
 ---
 
 ## Client App Authentication
 
-Mỗi Client App có:
+Mỗi Client App được cấp trước:
 
-- machineId
-- machineSecret
+- `machineId` — UUID định danh máy, sinh một lần khi cài đặt.
+- `machineSecret` — chuỗi bí mật, lưu trong file `.env` trên máy được điều khiển.
 
-Gateway sử dụng hai thông tin này để xác thực Client App trước khi cho phép đăng ký vào hệ thống.
+Flow:
+
+```text
+1. Client App kết nối WebSocket tới Gateway
+2. Client App gửi auth.client { machineId, machineSecret, hostname, ipAddress }
+3. Gateway kiểm tra machineId + machineSecret với danh sách đã đăng ký
+4. Nếu hợp lệ → đăng ký vào Machine Registry, trả sessionToken
+5. Nếu không hợp lệ → trả AUTHENTICATION_FAILED, đóng kết nối
+```
+
+Chi tiết message payload xem tại `api_contract.md`.
 
 ---
 
@@ -121,47 +150,25 @@ Client App không được phép gửi Command tới Client App khác hoặc Web
 
 # Permission Confirmation
 
-Các chức năng sau yêu cầu sự đồng ý của End User:
-
-- Live Screen
-- Webcam
-- Key Logger
-- Power Management
+Danh sách đầy đủ các chức năng yêu cầu xác nhận và message types tương ứng xem tại `api_contract.md` — **Sensitive Feature List**.
 
 Luồng xử lý:
 
 ```text
-Administrator
-
-↓
-
-Web App
-
-↓
-
-Gateway
-
-↓
-
-Client App
-
-↓
-
-Permission Dialog
-
-↓
-
-Accept / Reject
-
-↓
-
-Execute Command
+Administrator → Web App → Gateway → Client App → Permission Dialog
+    ↑                                                    │
+    │                                           Accept / Reject
+    │                                                    │
+    └────────────── Execute Command ◄── granted: true ──┘
+    └────────────── Error Response  ◄── granted: false ─┘
 ```
+
+- Timeout: **30 giây**. Nếu End User không phản hồi → `PERMISSION_TIMEOUT`.
 
 Nếu End User từ chối:
 
 - Không thực hiện Command.
-- Trả về lỗi cho Administrator.
+- Trả về lỗi `PERMISSION_DENIED` cho Administrator.
 
 ---
 
@@ -198,26 +205,38 @@ Người dùng luôn biết khi một chức năng nhạy cảm đang được s
 
 Gateway giám sát trạng thái kết nối của Client App thông qua Heartbeat.
 
+Thông số:
+
+| Parameter            | Value | Mô tả                                          |
+| -------------------- | ----- | ---------------------------------------------- |
+| `HEARTBEAT_INTERVAL` | 15s   | Client App gửi heartbeat mỗi 15 giây           |
+| `HEARTBEAT_TIMEOUT`  | 45s   | Không nhận heartbeat trong 45s → đánh dấu Offline |
+| `RECONNECT_INTERVAL` | 5s    | Client App thử kết nối lại sau mỗi 5 giây      |
+
 Nếu Heartbeat không được nhận trong khoảng thời gian quy định:
 
 - Machine được đánh dấu Offline.
 - Administrator được cập nhật trạng thái.
-- Client App sẽ tự động kết nối lại khi có thể.
+- Client App sẽ tự động kết nối lại theo `RECONNECT_INTERVAL`.
 
 ---
 
 # Audit Logging
 
-Mọi thao tác điều khiển đều được ghi nhận.
+Mọi thao tác điều khiển đều được ghi nhận bởi **Web App backend**.
 
 Thông tin bao gồm:
 
-- Timestamp
-- Administrator
-- Machine
-- Command
-- Result
-- Error (nếu có)
+| Field         | Mô tả                          |
+| ------------- | ------------------------------ |
+| `timestamp`   | Thời gian thực hiện (UTC)      |
+| `adminUser`   | Username của Administrator     |
+| `machineId`   | ID của Machine được điều khiển |
+| `command`     | Loại thao tác (message type)   |
+| `result`      | `success` hoặc `failed`        |
+| `errorCode`   | Mã lỗi nếu thất bại            |
+
+Audit Log lưu trong SQLite (bảng `audit_logs`).
 
 Audit Log phục vụ:
 
@@ -324,4 +343,5 @@ Mọi thao tác đều có thể được kiểm tra và truy vết khi xảy ra
 - system_specification.md
 - system_architecture.md
 - communication_protocol.md
-- tech_stack.md
+- TECH_STACK.md
+- **api_contract.md** — Sensitive Feature List, permission message contract
