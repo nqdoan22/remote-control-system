@@ -1,114 +1,105 @@
-// web-app/frontend/src/components/modules/KeyLogger.jsx
+// frontend/src/components/modules/Keylogger.jsx
 import React, { useState, useEffect } from 'react';
-import ModulePanel from '../shared/ModulePanel';
 
-function KeyLogger({ machineId }) {
-  const [status, setStatus] = useState('disabled'); 
-  const [logs, setLogs] = useState([]); 
-  const [isLoading, setIsLoading] = useState(false); 
-  const [filterText, setFilterText] = useState(''); 
+const Keylogger = ({ machineId, sendCommand, lastMessage }) => {
+    const [isLogging, setIsLogging] = useState(false);
+    const [logs, setLogs] = useState('');
+    const [status, setStatus] = useState('');
 
-  const fetchKeyLogs = async () => {
-    if (status !== 'active') return;
-    setIsLoading(true);
-    setTimeout(() => {
-      setLogs([{ timestamp: "19:45:12", window: "Chrome", content: "hello world" }]);
-      setIsLoading(false);
-    }, 600);
-  };
+    // Lắng nghe sự kiện bàn phím thời gian thực từ WebSocket
+    useEffect(() => {
+        if (isLogging && lastMessage && lastMessage.type === 'keylogger.event') {
+            if (lastMessage.payload?.key) {
+                setLogs(prev => prev + lastMessage.payload.key);
+            }
+        }
+    }, [lastMessage, isLogging]);
 
-  useEffect(() => {
-    let intervalId;
-    if (status === 'active') {
-      fetchKeyLogs();
-      intervalId = setInterval(fetchKeyLogs, 5000);
-    }
-    return () => { if (intervalId) clearInterval(intervalId); };
-  }, [status, machineId]);
+    const startLogging = async () => {
+        setStatus('Đang xin phép người dùng để bật ghi phím...');
+        try {
+            const res = await sendCommand('keylogger.start', machineId);
+            if (res.success) {
+                setIsLogging(true);
+                setStatus('🟢 Đang ghi phím thời gian thực');
+            }
+        } catch (err) {
+            if (err.code === 'USER_REJECTED') {
+                setStatus('❌ Người dùng đã từ chối cấp quyền Ghi phím.');
+            } else if (err.code === 'CONSENT_TIMEOUT') {
+                setStatus('⏳ Hết thời gian chờ người dùng xác nhận.');
+            } else {
+                setStatus(`❌ Lỗi: ${err.message}`);
+            }
+        }
+    };
 
-  const handleStartLogging = () => {
-    if (window.confirm("Xin quyền ghi phím?")) {
-      setStatus('pending');
-      setTimeout(() => { setStatus('active'); }, 3000);
-    }
-  };
+    const stopLogging = async () => {
+        try {
+            await sendCommand('keylogger.stop', machineId);
+        } catch (err) {
+            console.error('Lỗi khi dừng keylogger:', err);
+        } finally {
+            setIsLogging(false);
+            setStatus('🔴 Đã dừng ghi phím');
+        }
+    };
 
-  const handleStopLogging = () => {
-    if (window.confirm("Tắt Keylogger?")) {
-      setStatus('disabled');
-      setLogs([]);
-    }
-  };
+    const clearLogs = () => setLogs('');
 
-  const filteredLogs = logs.filter(item => item.content.toLowerCase().includes(filterText.toLowerCase()));
+    useEffect(() => {
+        return () => {
+            if (isLogging) {
+                sendCommand('keylogger.stop', machineId).catch(() => {});
+            }
+        };
+    }, [isLogging, machineId, sendCommand]);
 
-  // NHÓM CÁC NÚT ĐIỀU KHIỂN VÀO ACTION BUTTONS
-  const actionBtns = (
-    <div style={{ display: 'flex', gap: '0.5rem' }}>
-      {status === 'disabled' && (
-        <button onClick={handleStartLogging} style={{...styles.btn, backgroundColor: '#2563eb'}}>🚀 Kích Hoạt</button>
-      )}
-      {(status === 'active' || status === 'pending') && (
-        <button onClick={handleStopLogging} style={{...styles.btn, backgroundColor: '#ef4444'}}>🛑 Tắt</button>
-      )}
-      {status === 'active' && (
-        <button onClick={fetchKeyLogs} disabled={isLoading} style={{...styles.btn, backgroundColor: '#10b981'}}>
-          {isLoading ? '⏳...' : '🔄 Làm mới'}
-        </button>
-      )}
-    </div>
-  );
+    return (
+        <div style={{ padding: '20px' }}>
+            <h3 style={{ margin: '0 0 10px 0' }}>Ghi Bàn Phím (Keylogger)</h3>
+            <p style={{ fontSize: '13px', color: '#b45309', backgroundColor: '#fffbeb', padding: '10px', borderRadius: '4px', marginBottom: '15px' }}>
+                ⚠️ <strong>Yêu cầu xác nhận:</strong> Tính năng theo dõi thao tác phím cần người dùng bấm chấp nhận trên Popup.
+            </p>
 
-  const descText = status === 'active' ? '🟢 ĐANG HOẠT ĐỘNG' : status === 'pending' ? '🟡 ĐANG CHỜ DUYỆT...' : '🔴 ĐÃ TẮT';
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+                {!isLogging ? (
+                    <button onClick={startLogging} style={{ padding: '8px 16px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                        ⌨️ Bắt đầu Ghi phím
+                    </button>
+                ) : (
+                    <button onClick={stopLogging} style={{ padding: '8px 16px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                        ⏹ Dừng Ghi phím
+                    </button>
+                )}
+                <button onClick={clearLogs} style={{ padding: '8px 16px', backgroundColor: '#6b7280', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                    🗑️ Xóa màn hình
+                </button>
+            </div>
 
-  return (
-    <ModulePanel 
-      title="⌨️ Hệ Thống Giám Sát Bàn Phím" 
-      description={`Trạng thái: ${descText}`}
-      actionButtons={actionBtns}
-    >
-      {status === 'active' && (
-        <div style={styles.tableContainer}>
-          <input 
-            type="text" 
-            placeholder="🔍 Tìm nhanh nội dung..." 
-            value={filterText}
-            onChange={(e) => setFilterText(e.target.value)}
-            style={styles.searchInput}
-          />
-          <table style={styles.table}>
-            <thead>
-              <tr style={styles.tableHeadRow}>
-                <th style={styles.tableHeadCell}>Thời Gian</th>
-                <th style={styles.tableHeadCell}>Ứng Dụng</th>
-                <th style={styles.tableHeadCell}>Nội Dung</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredLogs.map((item, idx) => (
-                <tr key={idx} style={styles.tableRow}>
-                  <td style={styles.tableCell}><code>{item.timestamp}</code></td>
-                  <td style={{...styles.tableCell, color: '#0369a1'}}>{item.window}</td>
-                  <td style={{...styles.tableCell, fontFamily: 'monospace'}}>{item.content}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            {status && <div style={{ marginBottom: '15px', fontWeight: 'bold' }}>{status}</div>}
+
+            <div>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px' }}>Nhật ký phím gõ (Key Logs):</label>
+                <textarea 
+                    value={logs} 
+                    readOnly 
+                    placeholder="Dữ liệu bàn phím sẽ hiển thị ở đây khi có thao tác trên máy khách..."
+                    style={{ 
+                        width: '100%', 
+                        height: '300px', 
+                        backgroundColor: '#1e293b', 
+                        color: '#38bdf8', 
+                        fontFamily: 'monospace', 
+                        padding: '12px', 
+                        borderRadius: '6px',
+                        boxSizing: 'border-box',
+                        resize: 'vertical'
+                    }}
+                />
+            </div>
         </div>
-      )}
-    </ModulePanel>
-  );
-}
-
-const styles = {
-  btn: { color: 'white', padding: '0.5rem 1rem', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600' },
-  tableContainer: { padding: '1rem 0' },
-  searchInput: { width: '100%', maxWidth: '400px', padding: '0.5rem 1rem', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', marginBottom: '1rem' },
-  table: { width: '100%', borderCollapse: 'collapse', textAlign: 'left' },
-  tableHeadRow: { backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0' },
-  tableHeadCell: { padding: '1rem', fontSize: '0.85rem', fontWeight: 'bold', color: '#64748b' },
-  tableRow: { borderBottom: '1px solid #f1f5f9' },
-  tableCell: { padding: '0.75rem 1rem', fontSize: '0.9rem', color: '#475569' }
+    );
 };
 
-export default KeyLogger;
+export default Keylogger;

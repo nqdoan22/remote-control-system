@@ -1,112 +1,95 @@
-// web-app/frontend/src/pages/LoginPage.jsx
+// frontend/src/pages/LoginPage.jsx
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../services/api';
 
-function LoginPage() {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const navigate = useNavigate();
+const LoginPage = () => {
+    const [username, setUsername] = useState('');
+    const [password, setPassword] = useState('');
+    const [error, setError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const navigate = useNavigate();
 
-  const handleLogin = async (e) => {
-  e.preventDefault();
-  setError('');
-  setIsLoading(true);
+    const handleLogin = async (e) => {
+        e.preventDefault();
+        setError('');
+        setIsLoading(true);
 
-  try {
-    // 🔗 GỌI API THẬT XUỐNG PYTHON BACKEND (Không dùng mock delay nữa)
-    const response = await axios.post('http://127.0.0.1:8000/api/auth/login', {
-      username,
-      password
-    });
+        try {
+            // FastAPI mặc định dùng OAuth2 form data cho login, 
+            // nên ta dùng URLSearchParams để gửi dạng form-urlencoded
+            const formData = new URLSearchParams();
+            formData.append('username', username);
+            formData.append('password', password);
 
-    // Nếu Backend trả về thành công (status 200)
-    if (response.data.status === 'success') {
-      // Lưu token thật và thông tin user thật vào localStorage
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
-      
-      // Chuyển hướng sang trang Dashboard
-      navigate('/dashboard');
-    }
-  } catch (err) {
-    // Nếu có lỗi (Ví dụ: sai mật khẩu trả về 401, hoặc mất kết nối server)
-    if (err.response) {
-      // Lỗi do Backend phản hồi về (Sai tài khoản/mật khẩu)
-      setError(err.response.data.detail);
-    } else {
-      // Lỗi do không kết nối được tới Server (Sập Backend)
-      setError('Không thể kết nối đến máy chủ Backend. Vui lòng kiểm tra lại!');
-    }
-  } finally {
-    setIsLoading(false);
-  }
-};
+            const response = await api.post('/auth/login', formData, {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
+            });
 
-  return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        <div style={styles.header}>
-          <h2 style={styles.title}>REMOTE CONTROL SYSTEM</h2>
-          <p style={styles.subtitle}>Đồ án Mạng Máy Tính - Hệ thống điều khiển từ xa</p>
+            // Nếu thành công, lưu Token và nhảy qua Dashboard
+            localStorage.setItem('admin_token', response.data.access_token);
+            navigate('/');
+            
+        } catch (err) {
+            setError('Đăng nhập thất bại. Vui lòng kiểm tra lại tài khoản hoặc mật khẩu.');
+            console.error('Lỗi login:', err);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return (
+        <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', backgroundColor: '#f3f4f6' }}>
+            <div style={{ width: '100%', maxWidth: '400px', padding: '30px', backgroundColor: 'white', borderRadius: '8px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+                <h2 style={{ textAlign: 'center', marginBottom: '10px' }}>Hệ Thống Quản Trị Từ Xa</h2>
+                <p style={{ textAlign: 'center', color: '#6b7280', marginBottom: '20px' }}>Đồ án Mạng Máy Tính - HCMUS</p>
+                
+                {error && <div style={{ color: 'red', backgroundColor: '#fee2e2', padding: '10px', borderRadius: '4px', marginBottom: '15px', fontSize: '14px' }}>{error}</div>}
+                
+                <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                    <div>
+                        <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Tên đăng nhập</label>
+                        <input 
+                            type="text" 
+                            required
+                            value={username}
+                            onChange={(e) => setUsername(e.target.value)}
+                            style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc', boxSizing: 'border-box' }}
+                        />
+                    </div>
+                    <div>
+                        <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Mật khẩu</label>
+                        <input 
+                            type="password" 
+                            required
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc', boxSizing: 'border-box' }}
+                        />
+                    </div>
+                    
+                    <button 
+                        type="submit" 
+                        disabled={isLoading}
+                        style={{ 
+                            padding: '12px', 
+                            backgroundColor: isLoading ? '#9ca3af' : '#2563eb', 
+                            color: 'white', 
+                            border: 'none', 
+                            borderRadius: '4px', 
+                            cursor: isLoading ? 'not-allowed' : 'pointer',
+                            fontWeight: 'bold',
+                            marginTop: '10px'
+                        }}
+                    >
+                        {isLoading ? 'Đang xác thực...' : 'Đăng nhập'}
+                    </button>
+                </form>
+            </div>
         </div>
-
-        <form onSubmit={handleLogin} style={styles.form}>
-          {error && <div style={styles.errorAlert}>{error}</div>}
-
-          <div style={styles.inputGroup}>
-            <label style={styles.label}>Tài khoản Admin</label>
-            <input
-              type="text"
-              placeholder="Nhập tài khoản..."
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              style={styles.input}
-              disabled={isLoading}
-            />
-          </div>
-
-          <div style={styles.inputGroup}>
-            <label style={styles.label}>Mật khẩu</label>
-            <input
-              type="password"
-              placeholder="Nhập mật khẩu..."
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              style={styles.input}
-              disabled={isLoading}
-            />
-          </div>
-
-          <button type="submit" style={styles.button} disabled={isLoading}>
-            {isLoading ? 'Đang xác thực...' : 'Đăng Nhập Hệ Thống'}
-          </button>
-        </form>
-
-        <div style={styles.footer}>
-          <p>⚠️ Lưu ý: Mọi hoạt động điều khiển đều được ghi lại log bảo mật.</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Inline CSS style cơ bản để giao diện nhìn gọn gàng ngay lập tức (Bạn có thể đổi sang Tailwind sau nhé)
-const styles = {
-  container: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#f0f2f5', fontFamily: 'Segoe UI, sans-serif' },
-  card: { width: '100%', maxVerticalWidth: '400px', padding: '2.5rem', borderRadius: '12px', backgroundColor: '#ffffff', boxShadow: '0 8px 24px rgba(0,0,0,0.1)' },
-  header: { textAlign: 'center', marginBottom: '2rem' },
-  title: { color: '#1e3a8a', margin: '0 0 0.5rem 0', fontSize: '1.6rem', fontWeight: 'bold', letterSpacing: '0.5px' },
-  subtitle: { color: '#6b7280', margin: 0, fontSize: '0.9rem' },
-  form: { display: 'flex', flexDirection: 'column', gap: '1.2rem' },
-  inputGroup: { display: 'flex', flexDirection: 'column', gap: '0.4rem' },
-  label: { fontSize: '0.875rem', fontWeight: '600', color: '#374151' },
-  input: { padding: '0.75rem', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '1rem', outline: 'none', transition: 'border 0.2s' },
-  button: { padding: '0.75rem', borderRadius: '6px', border: 'none', backgroundColor: '#2563eb', color: '#ffffff', fontSize: '1rem', fontWeight: '600', cursor: 'pointer', transition: 'background 0.2s' },
-  errorAlert: { padding: '0.75rem', borderRadius: '6px', backgroundColor: '#fee2e2', color: '#dc2626', fontSize: '0.875rem', border: '1px solid #fca5a5' },
-  footer: { marginTop: '2rem', textAlign: 'center', fontSize: '0.8rem', color: '#9ca3af' }
+    );
 };
 
 export default LoginPage;

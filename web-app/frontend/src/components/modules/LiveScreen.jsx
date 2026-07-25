@@ -1,125 +1,95 @@
-// web-app/frontend/src/components/modules/LiveScreen.jsx
-import React, { useState, useEffect, useRef } from 'react';
+// frontend/src/components/modules/LiveScreen.jsx
+import React, { useState, useEffect } from 'react';
 
-function LiveScreen({ machineId }) {
-  const [status, setStatus] = useState('disconnected'); 
-  const [imageSrc, setImageSrc] = useState(null); 
-  const wsRef = useRef(null); 
+const LiveScreen = ({ machineId, sendCommand, lastMessage }) => {
+    const [isStreaming, setIsStreaming] = useState(false);
+    const [frameSrc, setFrameSrc] = useState(null);
+    const [status, setStatus] = useState('');
+    const [fps, setFps] = useState(0);
 
-  const startStream = () => {
-    setStatus('connecting');
-
-    try {
-      const wsUrl = `ws://localhost:8000/api/ws/livestream/${machineId}`;
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setStatus('streaming');
-        // Đồng bộ hóa gửi tin nhắn kích hoạt Command lên Gateway
-        const startMessage = {
-          messageId: crypto.randomUUID(),
-          type: "screen.live.start",
-          timestamp: Math.floor(Date.now() / 1000),
-          source: "web-app",
-          destination: machineId,
-          payload: {}
-        };
-        ws.send(JSON.stringify(startMessage));
-      };
-
-      // Xử lý thông điệp JSON gói tin từ dữ liệu phân tuyến của Gateway
-      ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data);
-          
-          // Kiểm tra đúng loại tin nhắn đồng bộ theo quy ước đặt tên: module.action
-          if (message.type === 'screen.live.frame' && message.payload?.frame) {
-            const frameData = `data:image/jpeg;base64,${message.payload.frame}`;
-            setImageSrc(frameData); 
-          }
-        } catch (err) {
-          console.error("Gói tin không khớp định dạng thiết kế JSON tổng quát:", err);
+    // Xử lý luồng hình ảnh thời gian thực gửi về qua WebSocket
+    useEffect(() => {
+        if (isStreaming && lastMessage && lastMessage.type === 'livescreen.frame') {
+            if (lastMessage.payload?.imageBase64) {
+                setFrameSrc(`data:image/jpeg;base64,${lastMessage.payload.imageBase64}`);
+                if (lastMessage.payload.fps) {
+                    setFps(lastMessage.payload.fps);
+                }
+            }
         }
-      };
+    }, [lastMessage, isStreaming]);
 
-      ws.onerror = (error) => {
-        console.error("Lỗi luồng WebSocket:", error);
-        setStatus('error');
-      };
+    const startStream = async () => {
+        setStatus('Đang gửi yêu cầu Live Screen và chờ người dùng đồng ý (Timeout 15s)...');
+        try {
+            const res = await sendCommand('livescreen.start', machineId, { fps: 10 });
+            if (res.success) {
+                setIsStreaming(true);
+                setStatus('🟢 Đang phát trực tiếp màn hình');
+            }
+        } catch (err) {
+            if (err.code === 'USER_REJECTED') {
+                setStatus('❌ Người dùng đã từ chối cấp quyền màn hình.');
+            } else if (err.code === 'CONSENT_TIMEOUT') {
+                setStatus('⏳ Hết thời gian chờ người dùng xác nhận.');
+            } else {
+                setStatus(`❌ Lỗi: ${err.message}`);
+            }
+        }
+    };
 
-      ws.onclose = () => {
-        setStatus('disconnected');
-      };
+    const stopStream = async () => {
+        try {
+            await sendCommand('livescreen.stop', machineId);
+        } catch (err) {
+            console.error('Lỗi khi dừng stream:', err);
+        } finally {
+            setIsStreaming(false);
+            setFrameSrc(null);
+            setStatus('🔴 Đã dừng phát màn hình');
+        }
+    };
 
-    } catch (error) {
-      alert("Không thể khởi tạo luồng mạng: " + error.message);
-      setStatus('error');
-    }
-  };
+    // Tự ngắt stream khi Admin rời trang
+    useEffect(() => {
+        return () => {
+            if (isStreaming) {
+                sendCommand('livescreen.stop', machineId).catch(() => {});
+            }
+        };
+    }, [isStreaming, machineId, sendCommand]);
 
-  const stopStream = () => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      // Gửi lệnh đóng stream có cấu trúc trước khi ngắt socket vật lý
-      const stopMessage = {
-        messageId: crypto.randomUUID(),
-        type: "screen.live.stop",
-        timestamp: Math.floor(Date.now() / 1000),
-        source: "web-app",
-        destination: machineId,
-        payload: {}
-      };
-      wsRef.current.send(JSON.stringify(stopMessage));
-      wsRef.current.close(); 
-      wsRef.current = null;
-    }
-    setStatus('disconnected');
-    setImageSrc(null); 
-  };
+    return (
+        <div style={{ padding: '20px' }}>
+            <h3 style={{ margin: '0 0 10px 0' }}>Màn hình trực tiếp (Live Screen)</h3>
+            <p style={{ fontSize: '13px', color: '#b45309', backgroundColor: '#fffbeb', padding: '10px', borderRadius: '4px', marginBottom: '15px' }}>
+                ⚠️ <strong>Yêu cầu xác nhận:</strong> Chức năng này sẽ hiển thị thông báo xin phép trên màn hình máy khách.
+            </p>
 
-  useEffect(() => {
-    return () => { stopStream(); };
-  }, []);
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '15px' }}>
+                {!isStreaming ? (
+                    <button onClick={startStream} style={{ padding: '8px 16px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                        ▶ Bắt đầu xem Live
+                    </button>
+                ) : (
+                    <button onClick={stopStream} style={{ padding: '8px 16px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                        ⏹ Dừng xem Live
+                    </button>
+                )}
+                {isStreaming && <span style={{ fontSize: '13px', color: '#6b7280' }}>Tốc độ: {fps} FPS</span>}
+            </div>
 
-  return (
-    <div style={{ padding: '1rem', display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <h2>📺 Luồng Giám Sát Màn Hình (Real-time Stream)</h2>
-      
-      <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-        {status === 'disconnected' || status === 'error' ? (
-          <button onClick={startStream} style={styles.btnStart}>
-            ▶️ Bắt Đầu Xem Trực Tiếp
-          </button>
-        ) : (
-          <button onClick={stopStream} style={styles.btnStop}>
-            ⏹️ Dừng Giám Sát
-          </button>
-        )}
+            {status && <div style={{ marginBottom: '15px', fontWeight: 'bold' }}>{status}</div>}
 
-        <span style={{ fontWeight: 'bold', color: status === 'streaming' ? '#10b981' : (status === 'connecting' ? '#f59e0b' : '#ef4444') }}>
-          {status === 'streaming' ? '🟢 KẾT NỐI ỔN ĐỊNH' : status === 'connecting' ? '🟡 ĐANG XÁC THỰC QUYỀN TRUY CẬP...' : '🔴 ĐÃ NGẮT KẾT NỐI'}
-        </span>
-      </div>
-
-      <div style={styles.screenContainer}>
-        {imageSrc ? (
-          <img src={imageSrc} alt="Live Screen" style={styles.screenImage} />
-        ) : (
-          <div style={styles.placeholder}>
-            {status === 'connecting' ? 'Đang chờ khung hình xác nhận từ End User...' : 'Màn hình đang tắt. Bấm bắt đầu để xem.'}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-const styles = {
-  btnStart: { backgroundColor: '#2563eb', color: 'white', padding: '0.5rem 1rem', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
-  btnStop: { backgroundColor: '#ef4444', color: 'white', padding: '0.5rem 1rem', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
-  screenContainer: { flex: 1, backgroundColor: '#0f172a', borderRadius: '8px', border: '2px solid #334155', overflow: 'hidden', display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px', marginTop: '1rem' },
-  screenImage: { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' },
-  placeholder: { color: '#64748b', fontSize: '1.2rem', fontFamily: 'monospace' }
+            <div style={{ backgroundColor: '#000', borderRadius: '6px', overflow: 'hidden', display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+                {frameSrc ? (
+                    <img src={frameSrc} alt="Live Stream" style={{ maxWidth: '100%', maxHeight: '600px', objectFit: 'contain' }} />
+                ) : (
+                    <p style={{ color: '#9ca3af' }}>{isStreaming ? 'Đang chờ khung hình đầu tiên...' : 'Chưa bật phát trực tiếp'}</p>
+                )}
+            </div>
+        </div>
+    );
 };
 
 export default LiveScreen;

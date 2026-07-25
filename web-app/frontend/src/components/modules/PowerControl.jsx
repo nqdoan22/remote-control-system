@@ -1,53 +1,55 @@
-// web-app/frontend/src/components/modules/PowerControl.jsx
-import React from 'react';
-import ModulePanel from '../shared/ModulePanel';
+// frontend/src/components/modules/PowerControl.jsx
+import React, { useState } from 'react';
 
-function PowerControl({ machineId }) {
-  return (
-    <ModulePanel 
-      title="🔌 Điều khiển Nguồn hệ thống (Power Control)"
-      description={`Mã thiết bị nhận lệnh: ${machineId || 'Chưa chọn'}`}
-    >
-      <div style={styles.grid}>
-        <button style={styles.button} onClick={() => alert('Gửi lệnh Tắt máy')}>
-          <span style={styles.btnIcon}>🛑</span>
-          <h4 style={styles.btnTitle}>Tắt máy từ xa</h4>
-          <p style={styles.btnDesc}>Click để kích hoạt lệnh shutdown</p>
-        </button>
+const PowerControl = ({ machineId, sendCommand }) => {
+    const [status, setStatus] = useState('');
+    const [isRequesting, setIsRequesting] = useState(false);
 
-        <button style={styles.button} onClick={() => alert('Gửi lệnh Khởi động lại')}>
-          <span style={styles.btnIcon}>🔄</span>
-          <h4 style={styles.btnTitle}>Khởi động lại</h4>
-          <p style={styles.btnDesc}>Click để kích hoạt lệnh restart</p>
-        </button>
+    const handlePowerAction = async (actionStr) => {
+        setIsRequesting(true);
+        setStatus(`Đang gửi yêu cầu [${actionStr}] và chờ người dùng xác nhận (Timeout 15s)...`);
+        
+        try {
+            // Lệnh power.lock, power.restart, power.shutdown, power.sleep
+            const res = await sendCommand(`power.${actionStr}`, machineId);
+            if (res.success) {
+                setStatus(`✅ Thành công! Đã thực thi lệnh ${actionStr}.`);
+            }
+        } catch (err) {
+            if (err.code === 'USER_REJECTED') {
+                setStatus('❌ Thất bại: Người dùng đã từ chối yêu cầu.');
+            } else if (err.code === 'CONSENT_TIMEOUT') {
+                setStatus('⏳ Thất bại: Quá 15 giây không có phản hồi từ người dùng (Timeout).');
+            } else {
+                setStatus(`❌ Lỗi: ${err.message}`);
+            }
+        } finally {
+            setIsRequesting(false);
+        }
+    };
 
-        <button style={styles.button} onClick={() => alert('Gửi lệnh Khóa màn hình')}>
-          <span style={styles.btnIcon}>🔒</span>
-          <h4 style={styles.btnTitle}>Khóa màn hình</h4>
-          <p style={styles.btnDesc}>Click để kích hoạt lệnh lock</p>
-        </button>
+    return (
+        <div style={{ padding: '20px' }}>
+            <h3 style={{ margin: '0 0 20px 0' }}>Điều khiển Nguồn (Power Management)</h3>
+            
+            <div style={{ padding: '15px', backgroundColor: '#fffbeb', color: '#b45309', borderLeft: '4px solid #f59e0b', marginBottom: '20px' }}>
+                <strong>Lưu ý Bảo mật:</strong> Mọi thao tác tại đây đều yêu cầu người dùng cuối (End User) bấm xác nhận trên Popup.
+            </div>
 
-        <button style={styles.button} onClick={() => alert('Gửi lệnh Sleep')}>
-          <span style={styles.btnIcon}>🌙</span>
-          <h4 style={styles.btnTitle}>Chế độ ngủ (Sleep)</h4>
-          <p style={styles.btnDesc}>Click để kích hoạt lệnh sleep</p>
-        </button>
-      </div>
-    </ModulePanel>
-  );
-}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', maxWidth: '400px' }}>
+                <button onClick={() => handlePowerAction('lock')} disabled={isRequesting} style={{ padding: '15px', cursor: 'pointer', backgroundColor: '#e5e7eb', border: 'none', borderRadius: '4px' }}>🔒 Khóa màn hình (Lock)</button>
+                <button onClick={() => handlePowerAction('sleep')} disabled={isRequesting} style={{ padding: '15px', cursor: 'pointer', backgroundColor: '#e5e7eb', border: 'none', borderRadius: '4px' }}>🌙 Chế độ ngủ (Sleep)</button>
+                <button onClick={() => handlePowerAction('restart')} disabled={isRequesting} style={{ padding: '15px', cursor: 'pointer', backgroundColor: '#fca5a5', border: 'none', borderRadius: '4px' }}>🔄 Khởi động lại (Restart)</button>
+                <button onClick={() => handlePowerAction('shutdown')} disabled={isRequesting} style={{ padding: '15px', cursor: 'pointer', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '4px' }}>⛔ Tắt máy (Shutdown)</button>
+            </div>
 
-const styles = {
-  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem' },
-  button: {
-    backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '1.5rem',
-    cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center',
-    justifyContent: 'center', gap: '0.75rem', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
-    transition: 'all 0.2s ease',
-  },
-  btnIcon: { fontSize: '2.5rem', color: '#3b82f6' },
-  btnTitle: { fontWeight: 'bold', fontSize: '1.1rem', color: '#1e293b', margin: 0 },
-  btnDesc: { fontSize: '0.85rem', color: '#64748b', margin: 0, textAlign: 'center' }
+            {status && (
+                <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f3f4f6', borderRadius: '4px', fontWeight: 'bold' }}>
+                    {status}
+                </div>
+            )}
+        </div>
+    );
 };
 
 export default PowerControl;

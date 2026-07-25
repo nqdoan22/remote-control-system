@@ -1,90 +1,86 @@
-// web-app/frontend/src/components/shared/ModulePanel.jsx
+// frontend/src/components/shared/ModulePanel.jsx
 import React from 'react';
 
-/**
- * 🔲 ModulePanel: Thành phần bọc (Wrapper Component) dùng chung cho toàn bộ hệ thống
- * @param {string} title - Tiêu đề của chức năng (Ví dụ: "Quản lý tiến trình")
- * @param {string} description - Mô tả ngắn gọn nhiệm vụ của tab
- * @param {React.ReactNode} actionButtons - Khu vực chứa nút bấm phụ nếu có (tùy chọn)
- * @param {React.ReactNode} children - LƯU Ý KỸ THUẬT: Đây là toàn bộ ruột giao diện của module con truyền vào
- */
-function ModulePanel({ title, description, actionButtons, children }) {
-  return (
-    <div style={styles.panelContainer}>
-      
-      {/* 🔝 1. PHẦN ĐẦU TRUNG TÂM (HEADER) - Đồng bộ phong cách cho mọi module */}
-      <div style={styles.panelHeader}>
-        <div>
-          <h3 style={styles.panelTitle}>{title}</h3>
-          <p style={styles.panelDesc}>{description}</p>
+const ModulePanel = ({ activeModule, setActiveModule, onBack }) => {
+    // Danh sách menu định nghĩa sẵn
+    const menuGroups = [
+        {
+            title: "CHỨC NĂNG TIÊU CHUẨN",
+            items: [
+                { id: 'processes', label: 'Quản lý Tiến trình' },
+                { id: 'applications', label: 'Quản lý Ứng dụng' },
+                { id: 'screenshot', label: 'Chụp ảnh màn hình tĩnh' },
+            ]
+        },
+        {
+            title: "CHỨC NĂNG NHẠY CẢM (CẦN XIN QUYỀN)",
+            items: [
+                { id: 'livescreen', label: 'Màn hình trực tiếp (Live)' },
+                { id: 'webcam', label: 'Giám sát Webcam' },
+                { id: 'keylogger', label: 'Ghi phím (Keylogger)' },
+                { id: 'filetransfer', label: 'Quản lý Tệp (Sandbox)' },
+                { id: 'power', label: 'Điều khiển Nguồn' },
+            ]
+        }
+    ];
+
+    return (
+        <div style={{ 
+            width: '260px', 
+            backgroundColor: '#1f2937', 
+            color: 'white', 
+            display: 'flex', 
+            flexDirection: 'column' 
+        }}>
+            {/* Nút quay lại Dashboard */}
+            <div style={{ padding: '20px', borderBottom: '1px solid #374151' }}>
+                <button 
+                    onClick={onBack}
+                    style={{ 
+                        width: '100%', padding: '10px', backgroundColor: '#374151', 
+                        color: 'white', border: 'none', borderRadius: '4px', 
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                    }}
+                >
+                    ⬅ Quay lại Dashboard
+                </button>
+            </div>
+
+            {/* Render Menu */}
+            <div style={{ padding: '10px 0', flex: 1, overflowY: 'auto' }}>
+                {menuGroups.map((group, gIndex) => (
+                    <div key={gIndex} style={{ marginBottom: '20px' }}>
+                        <div style={{ 
+                            padding: '0 20px', fontSize: '11px', fontWeight: 'bold', 
+                            color: '#9ca3af', marginBottom: '8px', letterSpacing: '1px' 
+                        }}>
+                            {group.title}
+                        </div>
+                        {group.items.map(item => (
+                            <button
+                                key={item.id}
+                                onClick={() => setActiveModule(item.id)}
+                                style={{
+                                    width: '100%',
+                                    padding: '12px 20px',
+                                    textAlign: 'left',
+                                    backgroundColor: activeModule === item.id ? '#374151' : 'transparent',
+                                    color: activeModule === item.id ? '#60a5fa' : '#d1d5db',
+                                    border: 'none',
+                                    borderLeft: activeModule === item.id ? '4px solid #3b82f6' : '4px solid transparent',
+                                    cursor: 'pointer',
+                                    fontSize: '14px',
+                                    transition: 'all 0.2s'
+                                }}
+                            >
+                                {item.label}
+                            </button>
+                        ))}
+                    </div>
+                ))}
+            </div>
         </div>
-        
-        {/* Nếu module con có truyền thêm các nút thao tác nhanh (như nút Làm mới, Xuất file), chúng sẽ hiện ở đây */}
-        {actionButtons && (
-          <div style={styles.actionArea}>
-            {actionButtons}
-          </div>
-        )}
-      </div>
-
-      <hr style={styles.divider} />
-
-      {/* 📥 2. PHẦN THÂN (BODY) - Nơi chứa "ruột" giao diện thực tế của từng Module */}
-      <div style={styles.panelBody}>
-        {children} 
-      </div>
-      
-    </div>
-  );
-}
-
-// 🎨 CẤU HÌNH CSS CHUẨN: Đảm bảo mọi module mở ra đều có giao diện đồng đều tuyệt đối
-const styles = {
-  panelContainer: {
-    backgroundColor: '#ffffff',
-    borderRadius: '12px',
-    border: '1px solid #e2e8f0',
-    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-    padding: '1.5rem',
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100%',
-    boxSizing: 'border-box'
-  },
-  panelHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '1rem',
-    gap: '1rem'
-  },
-  panelTitle: {
-    margin: 0,
-    fontSize: '1.25rem',
-    fontWeight: '700',
-    color: '#1e293b'
-  },
-  panelDesc: {
-    margin: '0.25rem 0 0 0',
-    fontSize: '0.875rem',
-    color: '#64748b'
-  },
-  actionArea: {
-    display: 'flex',
-    gap: '0.5rem',
-    alignItems: 'center'
-  },
-  divider: {
-    border: 'none',
-    borderTop: '1px solid #f1f5f9',
-    margin: '0 0 1.5rem 0'
-  },
-  panelBody: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    minHeight: '0' // Kỹ thuật Flexbox ép phần thân không được tràn ra ngoài màn hình cha
-  }
+    );
 };
 
 export default ModulePanel;

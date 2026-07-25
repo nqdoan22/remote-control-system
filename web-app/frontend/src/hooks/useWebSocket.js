@@ -1,74 +1,48 @@
-// web-app/frontend/src/hooks/useWebSocket.js
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { CentralWebSocketService } from '../services/websocket';
+// frontend/src/hooks/useWebSocket.js
+import { useEffect, useState, useCallback } from 'react';
+import { wsService } from '../services/websocket';
 
-/**
- * 🪝 useWebSocket: Điều phối kết nối Socket.
- * ĐÃ ĐỒNG BỘ: Chuyển đổi định tuyến theo cấu trúc "module.action" chuẩn giao thức[cite: 18].
- */
-export function useWebSocket(endpoint, options = {}) {
-  const [isConnected, setIsConnected] = useState(false);
-  const [latestMessage, setLatestMessage] = useState(null);
-  const [error, setError] = useState(null);
+export const useWebSocket = () => {
+    const [isConnected, setIsConnected] = useState(false);
+    const [lastMessage, setLastMessage] = useState(null);
 
-  const socketServiceRef = useRef(null);
-  const optionsRef = useRef(options);
-  optionsRef.current = options;
+    useEffect(() => {
+        // Lấy token JWT từ Local Storage đã lưu sau khi đăng nhập
+        const token = localStorage.getItem('admin_token');
+        
+        if (!token) {
+            console.warn("Không tìm thấy Admin Token, bỏ qua kết nối WebSocket.");
+            return;
+        }
 
-  useEffect(() => {
-    if (!endpoint) return;
+        // 1. Mở kết nối
+        wsService.connect(
+            token,
+            () => setIsConnected(true),
+            () => setIsConnected(false)
+        );
 
-    // Giao tiếp thời gian thực bằng WebSocket được sử dụng cho Heartbeat, Live Screen, Webcam Streaming[cite: 14, 16].
-    const wsService = new CentralWebSocketService(endpoint, optionsRef.current);
-    socketServiceRef.current = wsService;
+        // 2. Đăng ký lắng nghe luồng dữ liệu (Stream/Events)
+        const unsubscribe = wsService.subscribe((msg) => {
+            setLastMessage(msg);
+        });
 
-    wsService.subscribe('open', (event) => {
-      setIsConnected(true);
-      setError(null);
-      if (optionsRef.current.onOpen) optionsRef.current.onOpen(event);
-    });
+        // 3. Dọn dẹp khi Component bị hủy (Unmount)
+        return () => {
+            unsubscribe();
+            // Tùy thuộc vào thiết kế, bạn có thể gọi wsService.disconnect() 
+            // nếu chỉ muốn kết nối WS khi ở trong Dashboard.
+        };
+    }, []);
 
-    // Mọi kết quả/thông điệp từ hệ thống sẽ nhận qua đây (Event/Response)[cite: 18].
-    wsService.subscribe('message', (rawData) => {
-      setLatestMessage(rawData);
-      if (optionsRef.current.onMessage) optionsRef.current.onMessage(rawData);
-    });
+    // Bọc hàm sendCommand bằng useCallback để tránh render lại Component không cần thiết
+    const sendCommand = useCallback((type, destination, payload = {}) => {
+        return wsService.sendCommand(type, destination, payload);
+    }, []);
 
-    wsService.subscribe('error', (errEvent) => {
-      setError(errEvent);
-      if (optionsRef.current.onError) optionsRef.current.onError(errEvent);
-    });
-
-    wsService.subscribe('close', (event) => {
-      setIsConnected(false);
-      if (optionsRef.current.onClose) optionsRef.current.onClose(event);
-    });
-
-    wsService.connect();
-
-    return () => {
-      if (socketServiceRef.current) {
-        socketServiceRef.current.disconnect();
-        socketServiceRef.current = null;
-      }
-      setIsConnected(false);
-      setLatestMessage(null);
+    return { 
+        isConnected, 
+        sendCommand, 
+        lastMessage 
     };
-  }, [endpoint]);
-
-  // Đăng ký nhận luồng Streaming (Streaming được dùng cho Live Screen và Webcam)[cite: 18].
-  const subscribeToEvent = useCallback((eventType, callback) => {
-    if (socketServiceRef.current) {
-      socketServiceRef.current.subscribe(eventType, callback);
-    }
-  }, []);
-
-  // Phát lệnh gửi đi: Bắt buộc cấu trúc phân cấp module.action (VD: "process.list")[cite: 18].
-  const sendEvent = useCallback((msgType, payload = {}, destination = "gateway") => {
-    if (socketServiceRef.current) {
-      socketServiceRef.current.send(msgType, payload, destination);
-    }
-  }, []);
-
-  return { isConnected, latestMessage, error, sendEvent, subscribeToEvent };
-}
+};
