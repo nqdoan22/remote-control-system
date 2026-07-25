@@ -103,7 +103,7 @@ Gateway là trung tâm giao tiếp của toàn bộ hệ thống.
 
 ## Client App
 
-Client App chạy trên từng Machine.
+Client App chạy trên từng Machine, được viết bằng **Python**.
 
 ### Responsibilities
 
