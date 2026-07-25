@@ -37,7 +37,7 @@ class AgentMainWindow(QMainWindow):
         # Ghi chú minh bạch
         lbl_note = QLabel("Ứng dụng này đang chạy ngầm để nhận lệnh điều khiển.")
         lbl_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_note.setFont(QFont("Arial", 9, QFont.Style.StyleItalic))
+        lbl_note.setFont(QFont("Arial", 9, italic=True))
         layout.addWidget(lbl_note)
 
         central_widget.setLayout(layout)
