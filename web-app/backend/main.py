@@ -1,52 +1,43 @@
 # web-app/backend/main.py
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
 
-from routers import auth, machines, modules 
-from core.gateway_client import gateway_client
-from core.config import settings # Thêm dòng này để in log cho đẹp
+from core.config import settings
+from routers import auth, machines, modules
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Khởi động Backend: Web App đóng vai trò là giao diện quản trị
-    print(f"🚀 Backend đang khởi động... Kết nối tới Gateway tại {settings.GATEWAY_WS_URL}...")
-    await gateway_client.connect()  
-    
-    yield  
-    
-    # Ép hủy Task lắng nghe ngầm để dọn dẹp RAM an toàn
-    if hasattr(gateway_client, 'listen_task') and gateway_client.listen_task:
-        gateway_client.listen_task.cancel()
-        try:
-            await gateway_client.listen_task
-        except Exception:
-            pass
-            
-    if gateway_client.websocket:
-        await gateway_client.websocket.close()
-
-# Backend bắt buộc sử dụng Python
+# Khởi tạo ứng dụng FastAPI
 app = FastAPI(
-    title="Hệ thống Điều khiển từ xa API", 
-    description="Backend trung gian xử lý, chỉ gửi Command xuống Gateway",
-    version="1.0.0",
-    lifespan=lifespan
+    title="Remote Control System - Backend API",
+    description="Backend điều khiển 8 module qua Gateway WebSocket",
+    version="1.0.0"
 )
 
+# Cấu hình CORS để Frontend ReactJS có thể gọi API mà không bị lỗi block trình duyệt
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # ✅ Đã sửa: Cho phép mọi IP trong mạng LAN gọi API
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"], # Cho phép GET, POST, PUT, DELETE...
+    allow_headers=["*"], # Cho phép truyền mọi Header (bao gồm cả Authorization)
 )
 
+# Đăng ký các Routers
 app.include_router(auth.router)
 app.include_router(machines.router)
 app.include_router(modules.router)
 
+@app.get("/", tags=["Health Check"])
+def root():
+    """
+    Endpoint kiểm tra trạng thái hoạt động của Backend Server.
+    """
+    return {
+        "status": "online",
+        "service": "FastAPI Backend",
+        "message": "Hệ thống Backend đang hoạt động ổn định"
+    }
+
 if __name__ == "__main__":
-    import uvicorn
-    # host="0.0.0.0" đã rất chuẩn để mở mạng LAN!
+    # Lệnh chạy server khi gọi trực tiếp file main.py
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

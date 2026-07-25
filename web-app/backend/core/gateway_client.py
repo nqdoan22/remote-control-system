@@ -1,76 +1,64 @@
 # web-app/backend/core/gateway_client.py
+import json
+import logging
 import asyncio
 import websockets
-import json
-import uuid
-import time
+from typing import Dict, Any, Optional
+from core.config import settings
+
+logger = logging.getLogger("GatewayClient")
 
 class GatewayClient:
-    """Quản lý kết nối từ Web App Backend tới Gateway."""
+    """
+    Lớp hỗ trợ FastAPI Backend gửi lệnh tới Gateway qua giao thức WebSocket.
+    """
+    def __init__(self):
+        self.ws_url = settings.GATEWAY_WS_URL
 
-    def __init__(self, gateway_url: str):
-        self.gateway_url = gateway_url
-        self.websocket = None
-        self.pending_responses = {} 
-        self.listen_task = None
-
-    async def connect(self):
-        try:
-            # Backend Web App kết nối tới Gateway qua endpoint /webapp
-            self.websocket = await websockets.connect(f"{self.gateway_url}/webapp")
-            self.listen_task = asyncio.create_task(self._listen_loop())
-        except Exception as e:
-            print(f"❌ Kết nối Gateway thất bại: {e}")
-
-    async def _listen_loop(self):
-        """Vòng lặp lắng nghe phản hồi."""
-        try:
-            async for message in self.websocket:
-                response_data = json.loads(message)
-                # Đọc định danh theo chuẩn camelCase của Protocol: messageId[cite: 15, 18].
-                msg_id = response_data.get("messageId")
-                
-                if msg_id and msg_id in self.pending_responses:
-                    future = self.pending_responses[msg_id]
-                    if not future.done():
-                        future.set_result(response_data)
-        except websockets.exceptions.ConnectionClosed:
-            pass
-
-    async def send_command_and_wait(self, machine_id: str, msg_type: str, payload: dict = {}, timeout: int = 10):
-        if not self.websocket:
-            raise Exception("Chưa kết nối tới Gateway WebSocket!")
-
-        message_id = str(uuid.uuid4())
+    async def send_command(self, machine_id: str, action: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Gửi lệnh điều khiển tới một Máy trạm (Machine) cụ thể thông qua Gateway.
         
-        # Thiết lập gói tin tuân thủ cấu trúc chuẩn: messageId, type, timestamp, source, destination, payload[cite: 18].
-        message = {
-            "messageId": message_id,
-            "type": msg_type,           # Tên message sử dụng quy tắc module.action[cite: 18].
-            "timestamp": int(time.time()),
-            "source": "webapp",         # Nguồn gửi là webapp[cite: 18].
-            "destination": machine_id,  # Đích đến là machine_id của Client App[cite: 18].
+        Parameters:
+        - machine_id: UUID của máy bị điều khiển (đích)
+        - action: Tên chức năng (VD: 'process.list', 'webcam.start', 'power.shutdown')
+        - payload: Các tham số truyền kèm (VD: {"pid": 1234})
+        """
+        if payload is None:
+            payload = {}
+
+        # Đóng gói thông điệp theo chuẩn communication_protocol.md
+        command_packet = {
+            "messageId": f"cmd-{asyncio.get_event_loop().time()}",
+            "type": action,
+            "source": "webapp",
+            "destination": machine_id,
             "payload": payload
         }
 
-        loop = asyncio.get_running_loop()
-        future = loop.create_future()
-        self.pending_responses[message_id] = future
-
         try:
-            await self.websocket.send(json.dumps(message))
-            response = await asyncio.wait_for(future, timeout=timeout)
-            
-            # Xử lý các mã lỗi hệ thống (Standard Error Codes) như PERMISSION_DENIED, TIMEOUT[cite: 18].
-            if response.get("type") == "error":
-                err_payload = response.get("payload", {})
-                raise Exception(f"[{err_payload.get('code')}] {err_payload.get('message')}")
+            # Mở kết nối tạm thời tới Gateway để bắn lệnh
+            async with websockets.connect(self.ws_url, timeout=5) as ws:
+                # 1. Gửi gói tin Xác thực vai trò 'webapp'
+                auth_packet = {
+                    "type": "system.auth",
+                    "source": "webapp",
+                    "payload": {"secret": settings.AGENT_SECRET_KEY}
+                }
+                await ws.send(json.dumps(auth_packet))
                 
-            return response.get("payload", {})
-        
-        except asyncio.TimeoutError:
-            raise Exception(f"⏰ Lỗi TIMEOUT: Hết thời gian chờ phản hồi[cite: 18].")
-        finally:
-            self.pending_responses.pop(message_id, None)
+                # Đọc phản hồi xác thực từ Gateway
+                _ = await ws.recv()
 
-gateway_client = GatewayClient("ws://localhost:8765")
+                # 2. Gửi lệnh chính thức tới Agent
+                logger.info(f"📤 Gửi lệnh '{action}' tới máy '{machine_id}' qua Gateway...")
+                await ws.send(json.dumps(command_packet))
+                
+                return {"success": True, "message": "Command sent to Gateway"}
+
+        except Exception as e:
+            logger.error(f"❌ Không thể kết nối tới Gateway WebSocket tại {self.ws_url}: {e}")
+            return {"success": False, "error": f"Gateway connection error: {str(e)}"}
+
+# Khởi tạo một đối tượng duy nhất
+gateway_client = GatewayClient()

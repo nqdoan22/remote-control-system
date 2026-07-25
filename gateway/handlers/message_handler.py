@@ -1,107 +1,95 @@
 # gateway/handlers/message_handler.py
 import json
-import time
 import logging
-from core.connection_manager import ConnectionManager
+from websockets.server import WebSocketServerProtocol
+from core.connection_manager import manager
 
-logger = logging.getLogger("Gateway.MessageHandler")
+logger = logging.getLogger("MessageHandler")
 
-class MessageHandler:
-    """Xử lý định tuyến (Routing) và kiểm tra quyền (Authorization). Gateway không xử lý Business Logic[cite: 16, 18]."""
-    
-    def __init__(self, manager: ConnectionManager):
-        self.manager = manager
+# Mã Secret tĩnh dùng để xác thực Agent đơn giản (Sẽ khớp với config.py của Client Agent)
+AGENT_SECRET_KEY = "d8e8fca2dc0f896fd7cb4cb0031ba249"
 
-    async def process_incoming_message(self, websocket, raw_message: str, client_type: str, sender_id: str = None):
-        try:
-            data = json.loads(raw_message)
-        except json.JSONDecodeError:
-            return
-
-        # ---------------------------------------------------------------------
-        # 1. BỘ DỊCH TƯƠNG THÍCH THEO GIAO THỨC TRUYỀN THÔNG
-        # ---------------------------------------------------------------------
-        # Bắt buộc sử dụng trường messageId và type theo cấu trúc chuẩn[cite: 18].
-        msg_id = data.get("messageId") 
-        destination = data.get("destination") 
-        msg_type = data.get("type", "unknown")
+async def handle_incoming_message(websocket: WebSocketServerProtocol, raw_message: str):
+    """
+    Xử lý mọi thông điệp WebSocket đi vào Gateway.
+    Cấu trúc Message chuẩn:
+    {
+      "messageId": "uuid",
+      "type": "system.auth | process.list | ...",
+      "source": "webapp | client-01",
+      "destination": "gateway | client-01 | webapp",
+      "payload": { ... }
+    }
+    """
+    try:
+        data = json.loads(raw_message)
+        msg_type = data.get("type")
+        source = data.get("source")
+        destination = data.get("destination")
         payload = data.get("payload", {})
-        
-        if client_type == "agent" and "data" in data and not payload:
-            payload = data["data"]
+        message_id = data.get("messageId")
 
-        # ---------------------------------------------------------------------
-        # 2. KIỂM SOÁT AN TOÀN & PHÂN QUYỀN (AUTHORIZATION)
-        # ---------------------------------------------------------------------
-        # Nguyên tắc Least Privilege: Client App không được phép gửi Command tới Web App hoặc Client App khác[cite: 17].
-        if client_type == "agent":
-            # Gateway chỉ cho phép Client App gửi: Heartbeat, Response, Event, Streaming Data[cite: 17].
-            if msg_type != "heartbeat" and "response" not in msg_type and msg_type != "unknown":
-                await self._send_error(websocket, msg_id, "AUTHORIZATION_FAILED", "Quyền hạn không hợp lệ.")
-                return
-                
-            if msg_type == "heartbeat":
-                # Nhận Heartbeat định kỳ có chứa payload status online[cite: 18].
-                self.manager.update_heartbeat(sender_id)
-                return
+    except json.JSONDecodeError:
+        logger.error("Dữ liệu nhận được không đúng định dạng JSON!")
+        return
 
-        # ---------------------------------------------------------------------
-        # 3. ĐỊNH TUYẾN TIN NHẮN (MESSAGE ROUTING)
-        # ---------------------------------------------------------------------
-        # Web App chỉ được phép: Gửi Command, Nhận Response, Nhận Event[cite: 17].
-        if client_type == "webapp":
-            if not destination:
-                await self._send_error(websocket, msg_id, "INVALID_COMMAND", "Thiếu thông tin máy đích.")
-                return
+    # ==========================================
+    # 1. XỬ LÝ XÁC THỰC KẾT NỐI (system.auth)
+    # ==========================================
+    if msg_type == "system.auth":
+        # Xác thực từ Client Agent
+        if source and source.startswith("client"):
+            machine_secret = payload.get("machineSecret")
+            if machine_secret == AGENT_SECRET_KEY:
+                await manager.register_agent(source, websocket)
+                # Gửi phản hồi thành công về cho Agent
+                response = {
+                    "messageId": message_id,
+                    "type": "response",
+                    "source": "gateway",
+                    "destination": source,
+                    "payload": {"success": True, "data": {"message": "Authenticated successfully"}}
+                }
+                await websocket.send(json.dumps(response))
+            else:
+                logger.warning(f"❌ Agent '{source}' xác thực thất bại! Sai machineSecret.")
+                await websocket.close(1008, "Policy Violation: Authentication Failed")
 
-            agent_ws = self.manager.get_agent_socket(destination)
-            if not agent_ws:
-                # Nếu hệ thống phát hiện mất kết nối, trả về chuẩn lỗi MACHINE_OFFLINE[cite: 18].
-                await self._send_error(websocket, msg_id, "MACHINE_OFFLINE", f"Máy trạm [{destination}] hiện không trực tuyến.")
-                return
-
-            forward_packet = {
-                "messageId": msg_id,
-                "type": msg_type,
-                "timestamp": int(time.time()),
-                "source": "gateway", # Phản ánh đúng chặng truyền tin
-                "destination": destination,
-                "payload": payload
-            }
-            await agent_ws.send(json.dumps(forward_packet))
-
-        # Phản hồi từ Client App về Web App
-        elif client_type == "agent":
-            # Trả về Response format theo chuẩn[cite: 18].
-            return_packet = {
-                "messageId": msg_id,
+        # Xác thực từ Web App / Backend
+        elif source == "webapp":
+            await manager.register_webapp(websocket)
+            response = {
+                "messageId": message_id,
                 "type": "response",
-                "timestamp": int(time.time()),
-                "source": sender_id,
+                "source": "gateway",
                 "destination": "webapp",
-                "payload": payload
+                "payload": {"success": True, "data": {"message": "Web App Authenticated"}}
             }
-            
-            for webapp_ws in self.manager.webapp_connections:
-                try:
-                    await webapp_ws.send(json.dumps(return_packet))
-                except Exception:
-                    pass
+            await websocket.send(json.dumps(response))
+        return
 
-    async def _send_error(self, websocket, msg_id: str, code: str, message: str):
-        """Hàm phụ trợ trả về Standard Error Code (VD: AUTHENTICATION_FAILED, PERMISSION_DENIED)[cite: 18]."""
-        error_response = {
-            "messageId": msg_id,
-            "type": "error",
-            "timestamp": int(time.time()),
-            "source": "gateway",
-            "destination": "webapp",
-            "payload": {
-                "code": code,
-                "message": message
+    # ==========================================
+    # 2. XỬ LÝ ĐỊNH TUYẾN THÔNG ĐIỆP (ROUTING)
+    # ==========================================
+    
+    # Trường hợp 2.1: Tin nhắn gửi ĐẾN một Máy Client cụ thể (Lệnh từ Web App)
+    if destination and destination != "gateway" and destination != "webapp":
+        success = await manager.send_to_agent(destination, raw_message)
+        if not success:
+            # Nếu gửi thất bại (Agent Offline), báo lỗi về cho Web App
+            error_response = {
+                "messageId": message_id,
+                "type": "error",
+                "source": "gateway",
+                "destination": source,
+                "payload": {
+                    "code": "MACHINE_OFFLINE",
+                    "message": f"Target machine '{destination}' is offline or not found."
+                }
             }
-        }
-        try:
             await websocket.send(json.dumps(error_response))
-        except Exception:
-            pass
+
+    # Trường hợp 2.2: Phản hồi hoặc Luồng dữ liệu (Stream/Heartbeat) TỪ Agent GỬI VỀ Web App
+    else:
+        # Tự động gửi về tất cả các Web App Client đang lắng nghe
+        await manager.broadcast_to_webapps(raw_message)
