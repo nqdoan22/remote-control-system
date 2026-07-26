@@ -1,25 +1,101 @@
+"""
+main.py — Gateway entry point.
+
+Khởi động WebSocket server với hai endpoint riêng biệt:
+  - /client  : Client App kết nối vào
+  - /webapp  : Web App kết nối vào
+
+Theo system_architecture.md: Gateway là điểm kết nối duy nhất,
+không xử lý Business Logic.
+"""
+
 import asyncio
+import json
+import logging
 import websockets
+from websockets.server import WebSocketServerProtocol
+
+import config
 from core.connection_manager import ConnectionManager
-from handlers.message_handler import handle_message
+from core.heartbeat_manager import start_heartbeat
+from core.permission_manager import PermissionManager
+from handlers.client_handler import handle_client
+from handlers.webapp_handler import handle_webapp
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("gateway")
+
+# ---------------------------------------------------------------------------
+# Shared state
+# ---------------------------------------------------------------------------
 
 manager = ConnectionManager()
+manager.permission_manager = PermissionManager()
 
-async def handle_client(websocket, path):
-    """Xử lý kết nối từ Windows Client App"""
-    machine_id = await manager.register(websocket)
-    try:
-        async for message in websocket:
-            await handle_message(manager, machine_id, message)
-    except websockets.exceptions.ConnectionClosed:
-        pass
-    finally:
-        await manager.unregister(machine_id)
+# ---------------------------------------------------------------------------
+# Router — phân biệt /client và /webapp theo path
+# ---------------------------------------------------------------------------
+
+async def router(websocket: WebSocketServerProtocol):
+    """
+    Nhận kết nối WebSocket và điều hướng đến đúng handler
+    dựa trên request path.
+    """
+    path = websocket.request.path
+
+    if path == "/client":
+        logger.info("New Client App connection from %s", websocket.remote_address)
+        await handle_client(websocket, manager)
+
+    elif path == "/webapp":
+        logger.info("New Web App connection from %s", websocket.remote_address)
+        await handle_webapp(websocket, manager)
+
+    else:
+        logger.warning(
+            "Rejected unknown path '%s' from %s", path, websocket.remote_address
+        )
+        await websocket.close(code=4004, reason="Unknown path")
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 async def main():
-    print("Gateway đang chạy tại ws://0.0.0.0:8765")
-    async with websockets.serve(handle_client, "0.0.0.0", 8765):
-        await asyncio.Future()  # Chạy mãi mãi
+    logger.info(
+        "Gateway starting on ws://%s:%d", config.GATEWAY_HOST, config.GATEWAY_PORT
+    )
+    logger.info(
+        "Registered machines: %d",
+        len(config.REGISTERED_MACHINES),
+    )
+
+    async with websockets.serve(
+        router,
+        config.GATEWAY_HOST,
+        config.GATEWAY_PORT,
+    ):
+        # Khởi động heartbeat monitor cùng lúc với server
+        heartbeat_task = start_heartbeat(manager)
+        logger.info("Gateway is ready.")
+
+        try:
+            await asyncio.Future()  # chạy mãi mãi
+        finally:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+
 
 if __name__ == "__main__":
     asyncio.run(main())
