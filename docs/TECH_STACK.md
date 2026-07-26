@@ -13,7 +13,7 @@ Tài liệu này mô tả các công nghệ, thư viện và quy ước được
 | Frontend      | React + Vite                |
 | Backend       | FastAPI (Python)            |
 | Gateway       | Python asyncio + websockets |
-| Client App    | C# WPF                      |
+| Client App    | Python (tkinter)            |
 | Database      | SQLite                      |
 | Communication | WebSocket + JSON            |
 
@@ -32,14 +32,16 @@ Tài liệu này mô tả các công nghệ, thư viện và quy ước được
 
 ## Client App
 
-- .NET 8 / WPF
-- `System.Diagnostics` — quản lý process và application
-- `System.Drawing` / `System.Drawing.Imaging` — chụp ảnh màn hình (screenshot, live screen)
-- `System.Net.WebSockets` — kết nối WebSocket tới Gateway
-- `System.Text.Json` — serialize/deserialize JSON message
-- `AForge.Video` / `AForge.Video.DirectShow` — capture webcam
-- `Gma.System.MouseKeyHook` — keylogger (hook bàn phím)
-- Win32 API / PInvoke — lock screen, power control (shutdown, restart, sleep)
+- Python 3.11+
+- `tkinter` — giao diện Permission Dialog (built-in)
+- `websockets` — kết nối WebSocket tới Gateway
+- `Pillow` (PIL) — chụp ảnh màn hình (screenshot, live screen)
+- `mss` — screen capture hiệu năng cao cho live screen
+- `opencv-python` (cv2) — capture webcam
+- `pynput` — keylogger (hook bàn phím và chuột)
+- `psutil` — lấy thông tin process và application
+- `ctypes` / `pywin32` — lock screen, power control (shutdown, restart, sleep)
+- `python-dotenv` — load cấu hình từ `.env`
 
 ## Frontend
 
@@ -56,7 +58,7 @@ Tài liệu này mô tả các công nghệ, thư viện và quy ước được
 project/
 │
 ├── client-app/
-│   └── RemoteControlClient/
+│   └── remote_control_client/
 │
 ├── gateway/
 │
@@ -78,12 +80,11 @@ project/
 | Scope | Convention | Ví dụ |
 |---|---|---|
 | File (Python) | snake_case | `auth_manager.py` |
-| File (C#) | PascalCase | `PermissionService.cs` |
 | File (JS/TS) | camelCase | `machineService.ts` |
 | Class | PascalCase | `MessageRouter` |
 | Function / Method (Python) | snake_case | `validate_token()` |
-| Function / Method (C#) | PascalCase | `SendHeartbeat()` |
-| Variable | snake_case (Python), camelCase (C#/JS) | |
+| Variable (Python) | snake_case | `machine_id` |
+| Variable (JS/TS) | camelCase | `machineId` |
 
 ## Communication
 

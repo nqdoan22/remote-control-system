@@ -40,6 +40,7 @@ Trong đó:
 
 - Web App hoạt động trên trình duyệt.
 - Backend bắt buộc sử dụng Python.
+- **Toàn bộ hệ thống sử dụng Python** (Backend, Gateway, Client App).
 - Toàn bộ hệ thống chạy trên Windows.
 - Hỗ trợ điều khiển đồng thời nhiều máy.
 - Giao tiếp thời gian thực bằng WebSocket.
