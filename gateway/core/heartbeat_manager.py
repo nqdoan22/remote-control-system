@@ -56,8 +56,8 @@ async def heartbeat_loop(manager: ConnectionManager) -> None:
                 )
 
                 # Xóa socket stale để tránh gửi message vào kết nối chết
-                if machine_id in manager._client_sockets:
-                    stale_ws = manager._client_sockets.pop(machine_id)
+                stale_ws = manager.remove_client_socket(machine_id)
+                if stale_ws is not None:
                     try:
                         await stale_ws.close(code=4000, reason="Heartbeat timeout")
                     except Exception:

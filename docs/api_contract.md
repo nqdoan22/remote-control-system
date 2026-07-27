@@ -222,11 +222,36 @@ Client App
 
 ---
 
+# Command Routing Convention
+
+Mọi command gửi từ Web App tới một Client App cụ thể **phải** chứa field `destinationMachineId` trong `payload`.
+
+Gateway sử dụng field này để biết forward message đến machine nào.
+Field sẽ bị bỏ ra trước khi forward xuống Client App.
+
+```json
+{
+  "type": "<command-type>",
+  "payload": {
+    "destinationMachineId": "machine-uuid",
+    "...": "(các field payload của command)"
+  }
+}
+```
+
+| Field                  | Bắt buộc | Mô tả                                     |
+| ---------------------- | -------- | ----------------------------------------- |
+| `destinationMachineId` | ✅ Có    | UUID của máy đích (lấy từ `machine.list`) |
+
+Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được xử lý tại Gateway.
+
+---
+
 # Machine Management Messages
 
 ## machine.list
 
-**Web App → Gateway**
+**Web App → Gateway** *(không cần destinationMachineId)*
 
 ```json
 {
@@ -268,7 +293,9 @@ Client App
 ```json
 {
   "type": "application.list",
-  "payload": {}
+  "payload": {
+    "destinationMachineId": "machine-uuid"
+  }
 }
 ```
 

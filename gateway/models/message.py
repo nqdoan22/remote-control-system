@@ -37,7 +37,6 @@ def make_response(
     success: bool,
     data: dict | None = None,
     destination: str = "",
-    original_message_id: str | None = None,
 ) -> dict:
     """Tạo response thành công."""
     return make_message(

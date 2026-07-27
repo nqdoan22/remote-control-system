@@ -100,6 +100,17 @@ class ConnectionManager:
         """Cập nhật lastSeen — gọi mỗi khi nhận message từ machine."""
         self.registry.touch(machine_id)
 
+    def remove_client_socket(self, machine_id: str) -> object | None:
+        """
+        Xóa và trả về socket của machine khỏi _client_sockets.
+        Dùng bởi HeartbeatManager để dọn socket stale mà không cần
+        truy cập trực tiếp vào attribute private.
+
+        Returns:
+            WebSocket object nếu tồn tại, None nếu không có.
+        """
+        return self._client_sockets.pop(machine_id, None)
+
     # ------------------------------------------------------------------
     # Web App
     # ------------------------------------------------------------------
