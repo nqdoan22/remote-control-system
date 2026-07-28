@@ -30,11 +30,11 @@ class GatewayServiceThread(QThread):
         """Vòng lặp kết nối và duy trì WebSocket."""
         while self.running:
             try:
-                logger.info(f"🔌 Đang kết nối tới Gateway tại {config.GATEWAY_WS_URL}...")
+                logger.info(f"Dang ket noi toi Gateway tai {config.GATEWAY_WS_URL}...")
                 async with websockets.connect(config.GATEWAY_WS_URL) as ws:
                     self.websocket = ws
                     self.connection_changed.emit(True)
-                    logger.info("✅ Kết nối Gateway thành công!")
+                    logger.info("Ket noi Gateway thanh cong!")
 
                     # 1. Gửi gói tin Đăng ký thông tin Máy trạm (Register)
                     await self._register_machine()
@@ -46,28 +46,28 @@ class GatewayServiceThread(QThread):
                     )
 
             except (websockets.exceptions.ConnectionClosedError, OSError) as e:
-                logger.warning(f"⚠️ Mất kết nối Gateway: {e}. Thử lại sau {config.RECONNECT_DELAY}s...")
+                logger.warning(f"Mat ket noi Gateway: {e}. Thu lai sau {config.RECONNECT_DELAY}s...")
                 self.connection_changed.emit(False)
                 self.websocket = None
                 await asyncio.sleep(config.RECONNECT_DELAY)
             except Exception as e:
-                logger.error(f"❌ Lỗi không xác định trong kết nối WebSocket: {e}")
+                logger.error(f"Loi khong xac dinh trong ket noi WebSocket: {e}")
                 self.connection_changed.emit(False)
                 await asyncio.sleep(config.RECONNECT_DELAY)
 
     async def _register_machine(self):
         """Đăng ký thông tin Agent với Gateway."""
         register_pkt = {
-            "type": "system.register",
+            "type": "system.auth",
             "source": config.MACHINE_ID,
             "payload": {
-                "secret": config.MACHINE_SECRET_KEY,
+                "machineSecret": config.MACHINE_SECRET_KEY,
                 "hostname": config.HOSTNAME,
                 "ip_address": config.IP_ADDRESS
             }
         }
         await self.websocket.send(json.dumps(register_pkt))
-        logger.info(f"📋 Đã gửi gói tin đăng ký Agent: {config.HOSTNAME} ({config.MACHINE_ID})")
+        logger.info(f"Đã gửi gói tin đăng ký Agent: {config.HOSTNAME} ({config.MACHINE_ID})")
 
     async def _send_heartbeat(self):
         """Gửi nhịp tim (Heartbeat) định kỳ để Gateway duy trì trạng thái Online."""
@@ -88,13 +88,13 @@ class GatewayServiceThread(QThread):
         async for message in self.websocket:
             try:
                 data = json.loads(message)
-                logger.info(f"📩 Nhận gói tin từ Gateway: {data.get('type')}")
+                logger.info(f"Nhan goi tin tu Gateway: {data.get('type')}")
                 
                 # Bắn tín hiệu sang UI / Module Controller xử lý
                 self.command_received.emit(data)
                 
             except json.JSONDecodeError:
-                logger.error("❌ Nhận dữ liệu không đúng định dạng JSON")
+                logger.error("Nhan du lieu khong dung dinh dang JSON")
 
     async def send_response(self, response_data: dict):
         """Hàm hỗ trợ các Module gửi phản hồi (kết quả thực thi) ngược về Gateway."""
@@ -102,7 +102,7 @@ class GatewayServiceThread(QThread):
             try:
                 await self.websocket.send(json.dumps(response_data))
             except Exception as e:
-                logger.error(f"❌ Không thể gửi kết quả về Gateway: {e}")
+                logger.error(f"Khong the gui ket qua ve Gateway: {e}")
 
     def stop(self):
         """Dừng luồng kết nối an toàn."""

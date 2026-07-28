@@ -44,7 +44,7 @@ class PermissionManager:
                     # Gộp dữ liệu đọc được với cấu hình mặc định (phòng trường hợp thiếu key)
                     return {**self.default_permissions, **data}
             except Exception as e:
-                logger.error(f"❌ Lỗi đọc file permissions: {e}. Dùng cấu hình mặc định.")
+                logger.error(f"Loi doc file permissions: {e}. Dung cau hinh mac dinh.")
                 return self.default_permissions
         else:
             self.save_permissions(self.default_permissions)
@@ -56,9 +56,9 @@ class PermissionManager:
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(perms, f, indent=4)
             self.permissions = perms
-            logger.info("💾 Đã lưu cấu hình phân quyền thành công.")
+            logger.info("Da luu cau hinh phan quyen thanh cong.")
         except Exception as e:
-            logger.error(f"❌ Lỗi ghi file permissions: {e}")
+            logger.error(f"Loi ghi file permissions: {e}")
 
     def get_permission(self, module_name: str) -> str:
         """Lấy trạng thái cấp quyền hiện tại của một module cụ thể."""

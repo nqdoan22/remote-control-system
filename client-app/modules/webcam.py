@@ -35,14 +35,14 @@ class WebcamManager:
             # Mã hóa Base64
             encoded_string = base64.b64encode(buffer).decode('utf-8')
             
-            logger.info("📷 Đã chụp ảnh Webcam thành công.")
+            logger.info("Da chup anh Webcam thanh cong.")
             return {
                 "success": True,
                 "format": "jpeg",
                 "image_b64": encoded_string
             }
         except Exception as e:
-            logger.error(f"❌ Lỗi truy cập Webcam: {e}")
+            logger.error(f"Loi truy cap Webcam: {e}")
             return {"success": False, "error": str(e)}
 
 # Khởi tạo instance

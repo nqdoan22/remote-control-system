@@ -22,11 +22,11 @@ def init_db():
     """
     Khởi tạo CSDL SQLite và tài khoản Admin mặc định nếu chưa tồn tại.
     """
-    logger.info("🛠️ Đang khởi tạo các bảng CSDL SQLite...")
+    logger.info("Dang khoi tao cac bang CSDL SQLite...")
     
     # 1. Tạo tất cả các bảng dựa trên định nghĩa trong models.py
     Base.metadata.create_all(bind=engine)
-    logger.info("✅ Các bảng (users, machines, audit_logs) đã được tạo thành công.")
+    logger.info("Cac bang (users, machines, audit_logs) da duoc tao thanh cong.")
 
     # 2. Khởi tạo phiên làm việc để kiểm tra / tạo Admin mặc định
     db = SessionLocal()
@@ -35,7 +35,7 @@ def init_db():
         existing_admin = db.query(User).filter(User.username == "admin").first()
         
         if not existing_admin:
-            logger.info("🔑 Chưa tìm thấy tài khoản Admin. Đang tạo tài khoản Admin mặc định...")
+            logger.info("Chua tim thay tai khoan Admin. Dang tao tai khoan Admin mac dinh...")
             
             default_admin = User(
                 username="admin",
@@ -46,12 +46,12 @@ def init_db():
             db.commit()
             db.refresh(default_admin)
             
-            logger.info("🎉 Tạo tài khoản thành công! Username: 'admin' | Password: 'admin123'")
+            logger.info("Tao tai khoan thanh cong! Username: 'admin' | Password: 'admin123'")
         else:
-            logger.info("ℹ️ Tài khoản Admin đã tồn tại. Bỏ qua bước tạo mặc định.")
+            logger.info("Tai khoan Admin da ton tai. Bo qua buoc tao mac dinh.")
             
     except Exception as e:
-        logger.error(f"❌ Lỗi khi khởi tạo dữ liệu mặc định: {e}")
+        logger.error(f"Loi khi khoi tao du lieu mac dinh: {e}")
         db.rollback()
     finally:
         db.close()

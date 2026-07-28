@@ -45,8 +45,8 @@ class AgentMainWindow(QMainWindow):
     def update_connection_status(self, is_connected: bool):
         """Hàm được gọi bởi GatewayServiceThread khi trạng thái mạng thay đổi."""
         if is_connected:
-            self.lbl_status.setText("🟢 Trạng thái: ĐÃ KẾT NỐI (Online)")
+            self.lbl_status.setText("Trang thai: DA KET NOI (Online)")
             self.lbl_status.setStyleSheet("color: green; font-weight: bold;")
         else:
-            self.lbl_status.setText("🔴 Trạng thái: MẤT KẾT NỐI (Offline)")
+            self.lbl_status.setText("Trang thai: MAT KET NOI (Offline)")
             self.lbl_status.setStyleSheet("color: red; font-weight: bold;")

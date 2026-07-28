@@ -3,37 +3,33 @@ import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useWebSocket } from '../hooks/useWebSocket';
 import ModulePanel from '../components/shared/ModulePanel';
-
-// Placeholder cho các modules (Chúng ta sẽ code chi tiết sau)
-const PlaceholderModule = ({ title }) => (
-    <div style={{ padding: '20px', textAlign: 'center', color: '#6b7280' }}>
-        <h3>Module: {title}</h3>
-        <p>Đang chờ triển khai giao diện...</p>
-    </div>
-);
+import Processes from '../components/modules/Processes';
+import Applications from '../components/modules/Applications';
+import ScreenshotModule from '../components/modules/Screenshot';
+import LiveScreen from '../components/modules/LiveScreen';
+import KeyLogger from '../components/modules/KeyLogger';
+import Webcam from '../components/modules/Webcam';
+import FileTransfer from '../components/modules/FileTransfer';
+import PowerControl from '../components/modules/PowerControl';
 
 const MachinePage = () => {
     const { machineId } = useParams();
     const navigate = useNavigate();
     const { isConnected, sendCommand, lastMessage } = useWebSocket();
-    
-    // State lưu trữ module đang được chọn (Mặc định là xem Tiến trình)
     const [activeModule, setActiveModule] = useState('processes');
 
-    // Hàm render nội dung động dựa vào activeModule
     const renderActiveModule = () => {
-        // Truyền các props cần thiết xuống cho từng module con
         const moduleProps = { machineId, sendCommand, lastMessage, isConnected };
 
         switch (activeModule) {
-            case 'processes': return <PlaceholderModule title="Quản lý Tiến trình (Processes)" {...moduleProps} />;
-            case 'applications': return <PlaceholderModule title="Quản lý Ứng dụng (Applications)" {...moduleProps} />;
-            case 'screenshot': return <PlaceholderModule title="Chụp ảnh màn hình (Screenshot)" {...moduleProps} />;
-            case 'livescreen': return <PlaceholderModule title="Live Screen (Yêu cầu cấp quyền)" {...moduleProps} />;
-            case 'keylogger': return <PlaceholderModule title="Keylogger (Yêu cầu cấp quyền)" {...moduleProps} />;
-            case 'webcam': return <PlaceholderModule title="Webcam (Yêu cầu cấp quyền)" {...moduleProps} />;
-            case 'filetransfer': return <PlaceholderModule title="Truyền tệp - Sandbox (Yêu cầu cấp quyền)" {...moduleProps} />;
-            case 'power': return <PlaceholderModule title="Nguồn (Yêu cầu cấp quyền)" {...moduleProps} />;
+            case 'processes': return <Processes {...moduleProps} />;
+            case 'applications': return <Applications {...moduleProps} />;
+            case 'screenshot': return <ScreenshotModule {...moduleProps} />;
+            case 'livescreen': return <LiveScreen {...moduleProps} />;
+            case 'keylogger': return <KeyLogger {...moduleProps} />;
+            case 'webcam': return <Webcam {...moduleProps} />;
+            case 'filetransfer': return <FileTransfer {...moduleProps} />;
+            case 'power': return <PowerControl {...moduleProps} />;
             default: return <div>Vui lòng chọn một chức năng</div>;
         }
     };

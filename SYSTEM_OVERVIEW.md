@@ -31,9 +31,9 @@ Xây dựng hệ thống cho phép một **Web App** điều khiển từ xa nhi
                                                       ▼
                                            ┌──────────────────┐
                                            │  Windows Client   │
-                                           │  (C# WPF)         │
-                                           │  - Modules        │
-                                           │  - Permission     │
+│  (Python PyQt6)   │
+                                            │  - Modules        │
+                                            │  - Permission     │
                                            └──────────────────┘
 ```
 
@@ -43,7 +43,7 @@ Xây dựng hệ thống cho phép một **Web App** điều khiển từ xa nhi
 |---|---|---|
 | Web App | Giao diện người dùng, xác thực, điều phối lệnh | Backend: FastAPI (Python) / Frontend: React (Vite) |
 | Gateway | Trung gian kết nối, định tuyến message | Python (asyncio + websockets) |
-| Client App | Cài trên máy Windows bị điều khiển, thực thi lệnh | C# WPF (.NET) |
+| Client App | Cài trên máy Windows bị điều khiển, thực thi lệnh | Python (PyQt6) |
 
 ---
 
@@ -252,41 +252,38 @@ gateway/
 
 ---
 
-## 7. Client App (C# WPF)
+## 7. Client App (Python PyQt6)
 
 ```
-client-app/RemoteControlClient/
-├── App.xaml / App.xaml.cs        # Entry point, khởi tạo GatewayService khi start
-├── Models/
-│   ├── MachineInfo.cs            # Thông tin máy: MachineId, MachineName, IpAddress, OsVersion
-│   └── CommandMessage.cs         # Cấu trúc message: Type, MachineId, Payload
-├── Services/
-│   ├── GatewayService.cs         # Kết nối WebSocket đến Gateway, gửi/nhận message
-│   └── PermissionService.cs      # Quản lý trạng thái permission (AlwaysAsk/Allow/Deny)
-├── Modules/                       # Mỗi module 1 class, implement ExecuteAsync(payload)
-│   ├── ApplicationsModule.cs
-│   ├── ProcessesModule.cs
-│   ├── ScreenshotModule.cs
-│   ├── LiveScreenModule.cs
-│   ├── KeyLoggerModule.cs
-│   ├── FileDownloadModule.cs
-│   ├── WebcamModule.cs
-│   └── PowerControlModule.cs
-└── Views/
-    ├── MainWindow.xaml(.cs)              # Màn hình chính: trạng thái kết nối
-    ├── PermissionSettingsWindow.xaml     # Cấu hình quyền cho 8 module
-    └── PermissionPopupWindow.xaml        # Popup xin phép real-time
+client-app/
+├── main.py                    # Entry point: khởi tạo PyQt6 App + GatewayServiceThread
+├── config.py                  # Cấu hình: GATEWAY_WS_URL, MACHINE_SECRET_KEY, machine_id
+├── core/
+│   ├── gateway_service.py      # QThread: kết nối WebSocket đến Gateway, gửi/nhận message, heartbeat
+│   └── permission_service.py   # Quản lý trạng thái permission (ASK/ALLOW/DENY) lưu file JSON
+├── modules/                    # 8 module thực thi lệnh
+│   ├── applications.py         # subprocess.Popen, psutil process kill
+│   ├── processes.py            # psutil.process_iter (CPU%, RAM)
+│   ├── screenshot.py           # mss chụp màn hình → base64
+│   ├── live_screen.py          # mss + OpenCV nén JPEG stream
+│   ├── keylogger.py            # pynput key listener
+│   ├── file_manager.py         # Thao tác file trong Sandbox
+│   ├── webcam.py               # OpenCV VideoCapture
+│   └── power_control.py        # os.system(shutdown/restart/lock/sleep)
+└── ui/
+    ├── main_window.py          # PyQt6 QMainWindow: trạng thái kết nối
+    ├── permission_popup.py     # PyQt6 QDialog: popup xin quyền 15s
+    └── red_indicator.py        # PyQt6 overlay: viền đỏ cảnh báo
 ```
 
 **Vai trò chính:**
 - Kết nối và duy trì kết nối WebSocket đến Gateway (tự động reconnect nếu mất kết nối)
-- Nhận `CommandMessage` từ Gateway → `GatewayService.OnMessageReceived()` điều phối đến đúng Module theo `Type`
+- Nhận `CommandMessage` từ Gateway → điều phối đến đúng Module theo `type`
 - Mỗi Module:
   - Kiểm tra `PermissionService.RequestPermissionAsync(moduleName)` trước khi thực thi
-  - Thực thi tác vụ thực tế (dùng `System.Diagnostics`, `System.Drawing`, Win32 API, `pythonnet`/native libs nếu cần cho keylogger/webcam...)
-  - Gửi kết quả về Gateway qua `GatewayService.SendAsync()`
-- `PermissionSettingsWindow`: UI cho người dùng cấu hình trước (Always Ask / Allow / Deny) cho từng module
-- `PermissionPopupWindow`: hiện khi có `permission_request` và module đang ở chế độ Always Ask
+  - Thực thi tác vụ thực tế (dùng `psutil`, `mss`, `pynput`, `OpenCV`, Win32 API...)
+  - Gửi kết quả về Gateway
+- `PermissionPopup`: hiện khi có `permission_request` và module đang ở chế độ Always Ask
 
 ---
 
@@ -300,7 +297,7 @@ client-app/RemoteControlClient/
 | 4 | Live Screen | Stream màn hình + điều khiển chuột/bàn phím | Capture loop + `SendInput` Win32 API | ✅ |
 | 5 | Key Logger | Bật/tắt, xem log real-time | Low-level keyboard hook (`SetWindowsHookEx`) | ✅ |
 | 6 | File Download | Duyệt thư mục, tải file | `Directory.GetFiles`, `File.ReadAllBytes` (chunked) | ✅ |
-| 7 | Webcam | Stream webcam | `AForge.Video`/`OpenCvSharp` | ✅ |
+| 7 | Webcam | Stream webcam | `cv2.VideoCapture` (opencv-python) | ✅ |
 | 8 | Power Control | Shutdown / Sleep | `Process.Start("shutdown", ...)` | ✅ |
 
 ---
@@ -309,20 +306,20 @@ client-app/RemoteControlClient/
 
 | Thành phần | Ngôn ngữ | Framework / Thư viện chính |
 |---|---|---|
-| Web Backend | Python | FastAPI, websockets, python-jose (JWT), passlib |
+| Web Backend | Python | FastAPI, websockets, python-jose (JWT), bcrypt |
 | Web Frontend | JavaScript | React, Vite, React Router, Axios |
 | Gateway | Python | asyncio, websockets |
-| Client App | C# (.NET) | WPF, System.Net.WebSockets (hoặc thư viện tương đương) |
+| Client App | Python (PyQt6) | PyQt6, websockets, psutil, mss, opencv-python, pynput, Pillow |
 
 ---
 
 ## 10. Các điểm cần hoàn thiện (TODO tổng quan)
 
-- [ ] Cơ chế xác thực JWT đầy đủ (login, refresh, middleware bảo vệ route)
-- [ ] `gateway_client.py`: kết nối Backend ↔ Gateway, định nghĩa kênh điều khiển vs kênh stream
-- [ ] `connection_manager.py`: sinh `machine_id`, lưu trạng thái, broadcast online/offline
-- [ ] `message_handler.py`: implement điều phối đầy đủ theo bảng mục 4.2
-- [ ] Frontend: kết nối WebSocket cho Live Screen / Key Logger / Webcam, render real-time
-- [ ] Client App: implement từng Module theo Win32 API tương ứng
-- [ ] Client App: `PermissionService` đọc/ghi config từ file (JSON/XML)
+- [x] Cơ chế xác thực JWT đầy đủ (login, refresh, middleware bảo vệ route)
+- [x] `gateway_client.py`: kết nối Backend ↔ Gateway, định nghĩa kênh điều khiển vs kênh stream
+- [x] `connection_manager.py`: sinh `machine_id`, lưu trạng thái, broadcast online/offline
+- [x] `message_handler.py`: implement điều phối đầy đủ theo bảng mục 4.2
+- [x] Frontend: kết nối WebSocket cho Live Screen / Key Logger / Webcam, render real-time
+- [x] Client App: implement từng Module theo Win32 API tương ứng
+- [x] Client App: `PermissionService` đọc/ghi config từ file (JSON/XML)
 - [ ] Bảo mật: mã hóa kết nối (WSS/TLS), xác thực Client App với Gateway (tránh máy lạ kết nối vào)

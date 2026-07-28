@@ -23,7 +23,7 @@ class PermissionPopup(QDialog):
 
     def init_ui(self):
         """Vẽ các thành phần giao diện (Nút bấm, chữ, thanh tiến trình)"""
-        self.setWindowTitle("⚠️ Yêu cầu quyền truy cập")
+        self.setWindowTitle("Yeu cau quyen truy cap")
         self.setFixedSize(350, 150)
         # Ép cửa sổ luôn nổi trên cùng để người dùng không bỏ lỡ
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Dialog)

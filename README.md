@@ -10,7 +10,7 @@ remote-control-system/
 │   ├── backend/        # Python FastAPI
 │   └── frontend/       # React (Vite)
 ├── gateway/            # Python WebSocket Gateway
-└── client-app/         # C# WPF Windows Client
+└── client-app/         # Python PyQt6 Windows Client
 ```
 
 ## Khởi động
@@ -41,10 +41,14 @@ npm run dev
 
 ### 4. Client App
 
-Mở `client-app/RemoteControlClient.sln` bằng Visual Studio và build.
+```bash
+cd client-app
+pip install -r requirements.txt
+python main.py
+```
 
 ## Kiến trúc
 
 ```
-[Browser - React] ←HTTP/WS→ [FastAPI Backend] ←WS→ [Gateway] ←WS→ [C# WPF Client]
+[Browser - React] ←HTTP/WS→ [FastAPI Backend] ←WS→ [Gateway] ←WS→ [PyQt6 Client]
 ```

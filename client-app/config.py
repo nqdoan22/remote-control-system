@@ -12,7 +12,7 @@ class ClientConfig:
     # ------------------------------------------------------------------
     GATEWAY_WS_URL: str = os.getenv("GATEWAY_WS_URL", "ws://localhost:8765")
     
-    # Secret Key xác thực với Gateway (Khớp với GATEWAY và BACKEND)
+    # Secret Key xac thuc voi Gateway (Co the dat qua env MACHINE_SECRET_KEY)
     MACHINE_SECRET_KEY: str = os.getenv("MACHINE_SECRET_KEY", "d8e8fca2dc0f896fd7cb4cb0031ba249")
 
     # ------------------------------------------------------------------

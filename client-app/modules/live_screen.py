@@ -44,7 +44,7 @@ class LiveScreenManager:
                 "frame_b64": encoded_string
             }
         except Exception as e:
-            logger.error(f"❌ Lỗi Live Screen: {e}")
+            logger.error(f"Loi Live Screen: {e}")
             return {"success": False, "error": str(e)}
 
 # Khởi tạo instance

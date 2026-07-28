@@ -29,14 +29,14 @@ class ScreenshotManager:
                 # Mã hóa sang Base64 chuỗi (String)
                 encoded_string = base64.b64encode(png_bytes).decode('utf-8')
                 
-                logger.info("📸 Đã chụp ảnh màn hình thành công.")
+                logger.info("Da chup anh man hinh thanh cong.")
                 return {
                     "success": True, 
                     "format": "png",
                     "image_b64": encoded_string
                 }
         except Exception as e:
-            logger.error(f"❌ Lỗi khi chụp màn hình: {e}")
+            logger.error(f"Loi khi chup man hinh: {e}")
             return {"success": False, "error": str(e)}
 
 # Khởi tạo instance dùng chung

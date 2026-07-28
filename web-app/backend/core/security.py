@@ -1,4 +1,3 @@
-# web-app/backend/core/security.py
 import bcrypt
 import jwt
 import logging
