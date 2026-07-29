@@ -1,20 +1,20 @@
 // frontend/src/components/modules/FileTransfer.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 const FileTransfer = ({ machineId, sendCommand, isConnected }) => {
     const [files, setFiles] = useState([]);
-    const [currentPath, setCurrentPath] = useState('C:\\AgentSandbox\\');
+    const [currentPath, setCurrentPath] = useState('');
     const [status, setStatus] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const fileInputRef = useRef(null);
 
-    const fetchFiles = async (path) => {
+    const fetchFiles = useCallback(async (path) => {
         setIsLoading(true);
         setStatus('');
         try {
             const res = await sendCommand('file.list', machineId, { path });
             if (res.success) {
-                setFiles(res.data.entries);
+                setFiles(res.data?.entries || []);
                 setCurrentPath(path);
             }
         } catch (err) {
@@ -22,9 +22,11 @@ const FileTransfer = ({ machineId, sendCommand, isConnected }) => {
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [machineId, sendCommand]);
 
-    useEffect(() => { if (isConnected) fetchFiles(currentPath); }, [isConnected]);
+    useEffect(() => {
+        if (isConnected) fetchFiles(currentPath);
+    }, [isConnected, fetchFiles, currentPath]);
 
     const handleDownload = async (filename) => {
         setStatus(`Đang tải xuống ${filename}...`);

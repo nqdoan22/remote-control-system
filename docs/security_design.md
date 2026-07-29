@@ -2,326 +2,163 @@
 
 ## Overview
 
-Tài liệu này mô tả các cơ chế bảo mật được áp dụng trong hệ thống nhằm đảm bảo việc điều khiển từ xa được thực hiện an toàn, đúng quyền và có khả năng truy vết.
+Tài liệu này mô tả chi tiết các cơ chế bảo mật, mô hình rủi ro và các chốt chặn an toàn được áp dụng trong hệ thống. 
 
-Các mục tiêu chính:
-
-- Chỉ cho phép các thành phần hợp lệ tham gia hệ thống.
-- Chỉ cho phép người dùng được xác thực thực hiện thao tác điều khiển.
-- Bảo vệ quyền riêng tư của End User.
-- Ghi nhận toàn bộ hoạt động để phục vụ kiểm tra và truy vết.
+Mục tiêu cốt lõi của thiết kế bảo mật là đảm bảo việc điều khiển từ xa được thực hiện **an toàn, đúng thẩm quyền, tôn trọng quyền riêng tư của End User**, và **lưu vết toàn vẹn (Non-repudiation)** mọi hành động.
 
 ---
 
-# Security Principles
+# Security Principles (Nguyên tắc Bảo mật)
 
-Hệ thống được thiết kế theo các nguyên tắc sau:
+Hệ thống được thiết kế dựa trên 5 nguyên tắc bảo mật tiêu chuẩn:
 
-- Authentication trước Authorization.
-- Least Privilege.
-- Defense in Depth.
-- Secure by Default.
-- Audit Everything.
+1. **Authentication trước Authorization:** Mọi kết nối phải được xác thực danh tính trước khi kiểm tra quyền hạn.
+2. **Least Privilege (Quyền hạn tối thiểu):** Client App chỉ được cấp quyền truy cập vào một thư mục cụ thể (Sandbox), không có quyền can thiệp vào các tệp tin hệ thống cốt lõi của Windows.
+3. **Defense in Depth (Bảo mật nhiều lớp):** Áp dụng bảo vệ ở cả 3 tầng (Web App chặn UI, Gateway chặn Route, Client App chặn thực thi).
+4. **Explicit Consent (Minh bạch thông tin):** Mọi hành động xâm phạm quyền riêng tư đều phải được sự đồng ý rõ ràng (Accept) từ người dùng cuối.
+5. **Audit Everything (Truy vết toàn diện):** Mọi lệnh điều khiển đều được ghi log bất biến vào cơ sở dữ liệu.
 
 ---
 
-# Trust Boundary
+# Trust Boundary (Ranh giới Tín nhiệm)
 
-Hệ thống được chia thành các vùng tin cậy như sau:
+Hệ thống chia làm các vùng tín nhiệm (Trust Zones). Dữ liệu đi qua ranh giới giữa các vùng (Trust Boundary) đều bị coi là "không an toàn" cho đến khi được xác thực và kiểm tra.
 
 ```text
-+-----------------------------------------+
-| Administrator                           |
-+-----------------------------------------+
-                ▼
+ [ Admin User ]
+       │ (1) Authenticated UI
+       ▼
++------------------------------------------------+
+|                   WEB APP                      | (High Trust)
++------------------------------------------------+
+       │
+       │ (2) JWT / Secure Token via WebSocket
+       ▼
+================ TRUST BOUNDARY ==================
+       │
++------------------------------------------------+
+|                   GATEWAY                      | (Medium Trust - Broker)
++------------------------------------------------+
+       │
+       │ (3) Client ID & Secret Authentication
+       ▼
+================ TRUST BOUNDARY ==================
+       │
++------------------------------------------------+
+|                 CLIENT APP                     | (Low Trust - Exists on User PC)
++------------------------------------------------+
+       │
+       │ (4) Strict OS API Calls & Sandboxing
+       ▼
++------------------------------------------------+
+|           WINDOWS OPERATING SYSTEM             |
++------------------------------------------------+
 
-            Gateway
-
-                ▼
-
-            Client App
-
-+-----------------------------------------+
-| Gateway                                |
-+-----------------------------------------+
-
-============= Trust Boundary =============
-
-+-----------------------------------------+
-| Client App                             |
-+-----------------------------------------+
-                 │
-                 ▼
-+-----------------------------------------+
-| Windows Operating System               |
-+-----------------------------------------+
 ```
 
-Mỗi Trust Boundary yêu cầu cơ chế xác thực riêng trước khi cho phép truy cập.
+---
+
+# Authentication (Xác thực)
+
+## 1. Administrator Authentication (Web App)
+
+* Quản trị viên phải đăng nhập bằng Username và Password.
+* Mật khẩu lưu trong cơ sở dữ liệu (SQLite) **bắt buộc phải được băm (hash) bằng thuật toán Bcrypt**, tuyệt đối không lưu dạng plain-text.
+* Đăng nhập thành công, hệ thống cấp một **JWT (JSON Web Token)** có thời hạn.
+* Mọi API hoặc luồng WebSocket từ Web App gửi đi đều phải đính kèm JWT này để Gateway kiểm chứng.
+
+## 2. Client App Authentication (Agent)
+
+* Mỗi máy cài Client App được cấp một cặp khóa cấu hình sẵn trong `config.py`:
+* `CLIENT_ID` (Định danh máy)
+* `CLIENT_SECRET` (Mã bí mật kết nối)
+
+
+* Gateway sử dụng cặp thông tin này để xác thực Client App khi mở kết nối WebSocket ban đầu. Nếu sai Secret, Gateway đóng kết nối (Force Close) ngay lập tức.
 
 ---
 
-# Authentication
+# Authorization (Phân quyền truy cập)
 
-## Administrator Authentication
+Gateway hoạt động như một chốt chặn kiểm soát luồng đi của Message (JSON RPC).
 
-Administrator phải đăng nhập trước khi sử dụng hệ thống.
-
-Sau khi xác thực thành công:
-
-- Được phép truy cập Dashboard.
-- Được phép gửi Command.
-- Được phép xem Audit Log.
+* **Từ Web App (Admin):** Chỉ được phép gửi các thông điệp loại `Command` (Yêu cầu thực thi) và nhận `Event/Response`. Tuyệt đối không được gửi lệnh giả mạo `Heartbeat`.
+* **Từ Client App (Agent):** Chỉ được phép gửi thông điệp loại `Response` (Kết quả trả về), `Stream` (Hình ảnh), và `Heartbeat`. **Client App không được phép gửi Command điều khiển chéo sang một Client App khác.**
 
 ---
 
-## Web App Authentication
+# User Consent & Privacy (Bảo vệ Quyền riêng tư)
 
-Gateway chỉ chấp nhận kết nối từ Web App đã được xác thực.
+Đây là cơ chế bảo mật quan trọng nhất phía End User. Các chức năng: **Live Screen, Webcam, Keylogger, Power Control** bị khóa mặc định.
 
-Các kết nối không hợp lệ sẽ bị từ chối.
+## Luồng cấp quyền (Consent Flow):
 
----
+1. Khi có lệnh nhạy cảm, Client App (Main Thread) bật một **Popup PyQt6 (Always-on-Top)** trên chính giữa màn hình người dùng.
+2. Popup mô tả rõ: *"Admin đang yêu cầu tính năng [Webcam/Screen]. Bạn có đồng ý không?"*
+3. **Timeout Mechanism (Bảo vệ chống treo):** Nếu End User không bấm `Accept` hoặc `Reject` trong vòng **15 giây**, Client App tự động đánh giá là **TIMEOUT (Tương đương REJECT)** và đóng cửa sổ, chặn luồng thực thi.
 
-## Client App Authentication
+## Cảnh báo Trực quan (Visual Indicators):
 
-Mỗi Client App có:
-
-- machineId
-- machineSecret
-
-Gateway sử dụng hai thông tin này để xác thực Client App trước khi cho phép đăng ký vào hệ thống.
+* **Webcam:** Bất cứ khi nào ống kính Camera đang được sử dụng để stream, một cửa sổ (Red Indicator) chứa chấm đỏ nhấp nháy sẽ hiển thị ở góc màn hình End User và **không thể bị ẩn đi (Un-hideable)**.
 
 ---
 
-# Authorization
+# File Sandboxing (Cô lập hệ thống tệp)
 
-Sau khi xác thực thành công, Gateway sẽ kiểm tra quyền của từng Message.
+Chức năng File Transfer tiềm ẩn rủi ro rất lớn liên quan đến việc đánh cắp hoặc phá hoại dữ liệu (Directory Traversal Attack).
 
-Gateway chỉ cho phép:
-
-### Web App
-
-- Gửi Command.
-- Nhận Response.
-- Nhận Event.
+ * **Quy tắc Sandbox:** Client App chỉ được phép liệt kê, upload và download các tệp nằm gọn trong thư mục sandbox (cấu hình trong `config.py`, mặc định `~/AgentSandbox`).
+* **Sanitize Input (Làm sạch đầu vào):** Mọi đường dẫn do Admin gửi xuống đều được Client App kiểm tra. Các ký tự điều hướng ngược như `../`, `..\`, hoặc đường dẫn tuyệt đối ra ngoài Sandbox (`C:\Windows`) sẽ bị module `file_manager.py` **từ chối ngay lập tức**.
 
 ---
 
-### Client App
+# Audit Logging (Nhật ký Truy vết)
 
-- Gửi Heartbeat.
-- Gửi Response.
-- Gửi Streaming Data.
-- Gửi Event.
+Mọi lệnh điều khiển (Command) từ lúc phát đi đến khi có kết quả đều phải lưu vào bảng `audit_logs` tại Backend.
 
-Client App không được phép gửi Command tới Client App khác hoặc Web App.
+Thông tin lưu trữ bao gồm:
 
----
+* **Timestamp:** Thời gian chính xác (ISO 8601).
+* **Admin ID:** Định danh người ra lệnh.
+* **Machine ID:** Đích đến của lệnh.
+* **Action:** Tên hành động (VD: `webcam.start`, `process.kill`).
+* **Status:** Kết quả (`Success`, `User_Denied`, `Timeout`, `Failed`).
 
-# Permission Confirmation
-
-Các chức năng sau yêu cầu sự đồng ý của End User:
-
-- Live Screen
-- Webcam
-- Key Logger
-- Power Management
-
-Luồng xử lý:
-
-```text
-Administrator
-
-↓
-
-Web App
-
-↓
-
-Gateway
-
-↓
-
-Client App
-
-↓
-
-Permission Dialog
-
-↓
-
-Accept / Reject
-
-↓
-
-Execute Command
-```
-
-Nếu End User từ chối:
-
-- Không thực hiện Command.
-- Trả về lỗi cho Administrator.
+> **Nguyên tắc:** Log là bất biến (Immutable). Không cung cấp API xóa hoặc sửa log trên Web App.
 
 ---
 
-# File Sandbox
+# Threat Model & Mitigations (Các rủi ro và Biện pháp phòng chống)
 
-Client App chỉ được phép truy cập thư mục đã cấu hình.
-
-Ví dụ:
-
-```text
-C:\RemoteControl\
-```
-
-Mọi yêu cầu truy cập ngoài thư mục này đều bị từ chối.
-
-Điều này giúp hạn chế việc truy cập trái phép vào dữ liệu trên máy người dùng.
+| Rủi ro / Các kiểu tấn công (Threat) | Biện pháp phòng chống (Mitigation) |
+| --- | --- |
+| **Giả mạo Admin ra lệnh (Spoofing)** | Bắt buộc xác thực bằng JWT cho mọi kết nối từ Web App. Token hết hạn sẽ bị loại bỏ. |
+| **Giả mạo Client App kết nối** | Xác thực bằng `CLIENT_ID` và `CLIENT_SECRET` tĩnh tại Gateway. |
+| **Lộ mật khẩu Database** | Băm mật khẩu (Hash) bằng thuật toán Bcrypt có Salt. |
+| **Directory Traversal (Truy cập file trái phép)** | Áp dụng File Sandboxing, loại bỏ ký tự `../` tại Client App. |
+| **Xâm phạm đời tư ngầm (Spying)** | Buộc phải qua Popup xin quyền. Có Timeout 15s. Có chấm đỏ cảnh báo Webcam. |
+| **Mất kết nối đột ngột (Availability)** | Triển khai Ping/Pong Heartbeat mỗi 5s. Tự động kết nối lại (Auto-Reconnect) từ Client. |
 
 ---
 
-# Privacy Protection
+# Design Decisions (Quyết định thiết kế)
 
-Để bảo vệ quyền riêng tư của End User:
+## 1. Tại sao để Client App tự quyết định Timeout (15s)?
 
-- Webcam phải hiển thị chỉ báo đang hoạt động.
-- Live Screen phải được người dùng xác nhận.
-- Key Logger phải được người dùng xác nhận.
-- Power Control phải được người dùng xác nhận.
+Nếu Gateway giữ Timeout, có thể xảy ra độ trễ mạng khiến lệnh "Hủy" về trễ, dẫn đến việc cửa sổ Popup treo trên màn hình End User. Xử lý Timeout trực tiếp tại vòng lặp `asyncio` của Client App đảm bảo tính tức thời và giải phóng tài nguyên GUI ngay lập tức.
 
-Người dùng luôn biết khi một chức năng nhạy cảm đang được sử dụng.
+## 2. Tại sao Backend Web App lại ghi log thay vì Gateway?
 
----
-
-# Connection Security
-
-Gateway giám sát trạng thái kết nối của Client App thông qua Heartbeat.
-
-Nếu Heartbeat không được nhận trong khoảng thời gian quy định:
-
-- Machine được đánh dấu Offline.
-- Administrator được cập nhật trạng thái.
-- Client App sẽ tự động kết nối lại khi có thể.
-
----
-
-# Audit Logging
-
-Mọi thao tác điều khiển đều được ghi nhận.
-
-Thông tin bao gồm:
-
-- Timestamp
-- Administrator
-- Machine
-- Command
-- Result
-- Error (nếu có)
-
-Audit Log phục vụ:
-
-- Kiểm tra hoạt động.
-- Truy vết sự cố.
-- Phân tích bảo mật.
-
----
-
-# Security Threats
-
-## Giả mạo Administrator
-
-Mitigation
-
-- Authentication.
-
----
-
-## Giả mạo Client App
-
-Mitigation
-
-- machineId.
-- machineSecret.
-
----
-
-## Command trái phép
-
-Mitigation
-
-- Authorization.
-- Permission Checking.
-
----
-
-## Truy cập trái phép vào tệp
-
-Mitigation
-
-- File Sandbox.
-
----
-
-## Xâm phạm quyền riêng tư
-
-Mitigation
-
-- Permission Confirmation.
-- Webcam Indicator.
-
----
-
-## Client App mất kết nối
-
-Mitigation
-
-- Heartbeat.
-- Auto Reconnect.
-
----
-
-# Security Assumptions
-
-Hệ thống giả định rằng:
-
-- Gateway là thành phần đáng tin cậy.
-- Administrator sử dụng tài khoản hợp lệ.
-- Client App được cài đặt bởi người quản trị.
-- Các thành phần hoạt động trong cùng mạng LAN.
-
----
-
-# Design Decisions
-
-## Tại sao Gateway kiểm tra quyền?
-
-Để tránh Client App phải tự xử lý Authorization và giúp việc quản lý quyền tập trung hơn.
-
----
-
-## Tại sao End User phải xác nhận?
-
-Nhằm bảo vệ quyền riêng tư và đáp ứng yêu cầu của đồ án.
-
----
-
-## Tại sao sử dụng File Sandbox?
-
-Giới hạn phạm vi truy cập tệp giúp giảm thiểu rủi ro nếu Client App nhận được yêu cầu không hợp lệ.
-
----
-
-## Tại sao ghi Audit Log?
-
-Mọi thao tác đều có thể được kiểm tra và truy vết khi xảy ra sự cố.
+Gateway được thiết kế là một Broker cực nhanh và nhẹ (Stateless). Nếu Gateway phải lo việc ghi vào SQLite, nó có thể bị thắt nút cổ chai (Bottleneck) khi có hàng ngàn message. Do đó, Gateway chỉ "chuyển tiếp" kết quả về Backend của Web App, và Backend sẽ chịu trách nhiệm ghi Database.
 
 ---
 
 # Related Documents
 
-- project_requirements.md
-- system_specification.md
-- system_architecture.md
-- communication_protocol.md
-- tech_stack.md
+* `project_requirements.md`
+* `system_specification.md`
+* `system_architecture.md`
+* `communication_protocol.md`
+* `TECH_STACK.md`
+
+```

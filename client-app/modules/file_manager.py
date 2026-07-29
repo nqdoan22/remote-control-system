@@ -39,12 +39,55 @@ class FileManager:
             items = []
             for item in os.listdir(target):
                 item_path = os.path.join(target, item)
+                is_dir = os.path.isdir(item_path)
                 items.append({
                     "name": item,
-                    "is_dir": os.path.isdir(item_path),
-                    "size_bytes": os.path.getsize(item_path) if os.path.isfile(item_path) else 0
+                    "type": "directory" if is_dir else "file",
+                    "sizeBytes": os.path.getsize(item_path) if os.path.isfile(item_path) else 0,
+                    "modifiedAt": int(os.path.getmtime(item_path)) if os.path.exists(item_path) else None
                 })
-            return {"success": True, "path": path, "items": items}
+            return {"success": True, "path": path, "entries": items}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def download_file(self, path: str) -> dict:
+        """Đọc file trong Sandbox và trả về nội dung Base64."""
+        if not self._is_safe_path(path):
+            return {"success": False, "error": "Truy cập bị từ chối: Nằm ngoài Sandbox."}
+        target = self._get_abs_path(path)
+        if not os.path.exists(target) or not os.path.isfile(target):
+            return {"success": False, "error": "File không tồn tại."}
+        try:
+            import base64, mimetypes
+            with open(target, "rb") as f:
+                content_b64 = base64.b64encode(f.read()).decode("utf-8")
+            mime_type, _ = mimetypes.guess_type(target)
+            return {
+                "success": True,
+                "filename": os.path.basename(target),
+                "content": content_b64,
+                "sizeBytes": os.path.getsize(target),
+                "mimeType": mime_type or "application/octet-stream"
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def upload_file(self, destination_path: str, content_b64: str) -> dict:
+        """Ghi file vào Sandbox từ nội dung Base64."""
+        if not self._is_safe_path(destination_path):
+            return {"success": False, "error": "Truy cập bị từ chối: Nằm ngoài Sandbox."}
+        target = self._get_abs_path(destination_path)
+        try:
+            import base64
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            data = base64.b64decode(content_b64)
+            with open(target, "wb") as f:
+                f.write(data)
+            return {
+                "success": True,
+                "savedPath": target,
+                "message": f"Đã upload {os.path.basename(target)}"
+            }
         except Exception as e:
             return {"success": False, "error": str(e)}
 

@@ -18,8 +18,9 @@ class WebSocketService {
 
         this.ws.onopen = () => {
             console.log("🔌 Đã kết nối tới Gateway WebSocket");
-            // Gửi gói tin system.auth ngay khi kết nối theo đúng API Contract
-            this.send('system.auth', 'gateway', { token });
+            // Gửi gói tin system.auth với secret key để Gateway xác thực
+            const agentSecret = import.meta.env.VITE_AGENT_SECRET || 'd8e8fca2dc0f896fd7cb4cb0031ba249';
+            this.send('system.auth', 'gateway', { secret: agentSecret });
             if (onConnect) onConnect();
         };
 

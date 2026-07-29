@@ -12,7 +12,7 @@ const Processes = ({ machineId, sendCommand, isConnected }) => {
         setMessage('');
         try {
             const res = await sendCommand('process.list', machineId);
-            if (res.success) setProcesses(res.data.processes);
+            if (res.success) setProcesses(res.data?.processes || []);
         } catch (err) {
             setMessage(`Lỗi: ${err.message}`);
         } finally {

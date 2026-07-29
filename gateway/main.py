@@ -1,6 +1,7 @@
 # gateway/main.py
 import asyncio
 import logging
+import uuid
 import websockets
 from core.connection_manager import manager
 from handlers.message_handler import handle_incoming_message
@@ -29,10 +30,12 @@ async def router(websocket):
         # Nếu là Agent rớt kết nối, thông báo cho WebApp biết máy đó đã Offline
         if agent_id:
             offline_event = {
-                "type": "system.heartbeat",
+                "messageId": str(uuid.uuid4()),
+                "type": "system.offline",
                 "source": agent_id,
                 "destination": "webapp",
-                "payload": {"status": "offline"}
+                "timestamp": int(__import__('time').time()),
+                "payload": {"status": "offline", "machineId": agent_id}
             }
             await manager.broadcast_to_webapps(str(offline_event).replace("'", '"'))
 

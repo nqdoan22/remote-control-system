@@ -34,7 +34,7 @@ class ClientConfig:
     # 3. CẤU HÌNH BẢO AN & RECONNECT
     # ------------------------------------------------------------------
     HEARTBEAT_INTERVAL: int = 5  # Gửi Heartbeat định kỳ mỗi 5 giây
-    RECONNECT_DELAY: int = 3     # Thử kết nối lại sau 3 giây nếu mất mạng
+    RECONNECT_DELAY: int = 5     # Thử kết nối lại sau 5 giây nếu mất mạng
     
     # Thư mục Sandbox lưu trữ/thao tác file an toàn
     SANDBOX_DIR: str = os.path.join(os.path.expanduser("~"), "AgentSandbox")

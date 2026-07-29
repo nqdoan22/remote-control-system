@@ -15,11 +15,13 @@ async def handle_incoming_message(websocket: WebSocketServerProtocol, raw_messag
     Cấu trúc Message chuẩn:
     {
       "messageId": "uuid",
-      "type": "system.auth | process.list | ...",
-      "source": "webapp | client-01",
-      "destination": "gateway | client-01 | webapp",
+      "type": "system.auth | system.register | process.list | ...",
+      "source": "webapp | client-01 | mac-XXXX",
+      "destination": "gateway | client-01 | mac-XXXX | webapp",
       "payload": { ... }
     }
+    Ghi chú: Gateway chấp nhận cả "system.auth" (Backend) và "system.register" (Client App)
+    để xác thực kết nối. Source của Agent có thể là "client-XX" hoặc "mac-XXXX".
     """
     try:
         data = json.loads(raw_message)
@@ -34,15 +36,17 @@ async def handle_incoming_message(websocket: WebSocketServerProtocol, raw_messag
         return
 
     # ==========================================
-    # 1. XỬ LÝ XÁC THỰC KẾT NỐI (system.auth)
+    # 1. XỬ LÝ XÁC THỰC KẾT NỐI (system.auth / system.register)
     # ==========================================
-    if msg_type == "system.auth":
+    # Client gửi "system.register", Backend gửi "system.auth", Gateway chấp nhận cả hai
+    if msg_type in ("system.auth", "system.register"):
         # Xác thực từ Client Agent
-        if source and source.startswith("client"):
-            machine_secret = payload.get("machineSecret")
+        # Backend cũ gửi source="client-XX", Client App mới gửi source="mac-XXXX"
+        if source and source != "webapp":
+            # Client cũ gửi "machineSecret", Client mới gửi "secret" — check cả hai
+            machine_secret = payload.get("machineSecret") or payload.get("secret")
             if machine_secret == AGENT_SECRET_KEY:
                 await manager.register_agent(source, websocket)
-                # Gửi phản hồi thành công về cho Agent
                 response = {
                     "messageId": message_id,
                     "type": "response",
@@ -52,27 +56,60 @@ async def handle_incoming_message(websocket: WebSocketServerProtocol, raw_messag
                 }
                 await websocket.send(json.dumps(response))
             else:
-                logger.warning(f"❌ Agent '{source}' xác thực thất bại! Sai machineSecret.")
+                logger.warning(f"Agent '{source}' xác thực thất bại! Sai machineSecret.")
                 await websocket.close(1008, "Policy Violation: Authentication Failed")
 
         # Xác thực từ Web App / Backend
         elif source == "webapp":
-            await manager.register_webapp(websocket)
-            response = {
-                "messageId": message_id,
-                "type": "response",
-                "source": "gateway",
-                "destination": "webapp",
-                "payload": {"success": True, "data": {"message": "Web App Authenticated"}}
-            }
-            await websocket.send(json.dumps(response))
+            webapp_secret = payload.get("secret") or payload.get("token")
+            if webapp_secret == AGENT_SECRET_KEY:
+                await manager.register_webapp(websocket)
+                response = {
+                    "messageId": message_id,
+                    "type": "response",
+                    "source": "gateway",
+                    "destination": "webapp",
+                    "payload": {"success": True, "data": {"message": "Web App Authenticated"}}
+                }
+                await websocket.send(json.dumps(response))
+            else:
+                logger.warning(f"Web App xác thực thất bại! Sai secret.")
+                await websocket.close(1008, "Policy Violation: Authentication Failed")
         return
 
     # ==========================================
-    # 2. XỬ LÝ ĐỊNH TUYẾN THÔNG ĐIỆP (ROUTING)
+    # 2. XỬ LÝ CÁC LỆNH HỆ THỐNG (machine.list, ...)
+    # ==========================================
+
+    if msg_type == "machine.list":
+        machines = [
+            {
+                "machineId": mid,
+                "hostname": mid,
+                "ipAddress": "N/A",
+                "status": "online",
+                "lastSeen": None
+            }
+            for mid in manager.active_agents.keys()
+        ]
+        response = {
+            "messageId": message_id,
+            "type": "response",
+            "source": "gateway",
+            "destination": source,
+            "payload": {
+                "success": True,
+                "data": {"machines": machines}
+            }
+        }
+        await websocket.send(json.dumps(response))
+        return
+
+    # ==========================================
+    # 3. XỬ LÝ ĐỊNH TUYẾN THÔNG ĐIỆP (ROUTING)
     # ==========================================
     
-    # Trường hợp 2.1: Tin nhắn gửi ĐẾN một Máy Client cụ thể (Lệnh từ Web App)
+    # Trường hợp 3.1: Tin nhắn gửi ĐẾN một Máy Client cụ thể (Lệnh từ Web App)
     if destination and destination != "gateway" and destination != "webapp":
         success = await manager.send_to_agent(destination, raw_message)
         if not success:

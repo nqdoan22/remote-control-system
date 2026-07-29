@@ -12,7 +12,7 @@ const Applications = ({ machineId, sendCommand, isConnected }) => {
         setMessage('');
         try {
             const res = await sendCommand('application.list', machineId);
-            if (res.success) setApps(res.data.applications);
+            if (res.success) setApps(res.data?.applications || []);
         } catch (err) {
             setMessage(`Lỗi: ${err.message || 'Không thể lấy danh sách ứng dụng'}`);
         } finally {

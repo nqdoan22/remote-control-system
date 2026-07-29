@@ -31,10 +31,10 @@ Xây dựng hệ thống cho phép một **Web App** điều khiển từ xa nhi
                                                       ▼
                                            ┌──────────────────┐
                                            │  Windows Client   │
-                                           │  (C# WPF)         │
-                                           │  - Modules        │
-                                           │  - Permission     │
-                                           └──────────────────┘
+                                            │  (Python PyQt6)   │
+                                            │  - Modules        │
+                                            │  - Permission     │
+                                            └──────────────────┘
 ```
 
 **3 thành phần độc lập, giao tiếp qua mạng:**
@@ -43,7 +43,7 @@ Xây dựng hệ thống cho phép một **Web App** điều khiển từ xa nhi
 |---|---|---|
 | Web App | Giao diện người dùng, xác thực, điều phối lệnh | Backend: FastAPI (Python) / Frontend: React (Vite) |
 | Gateway | Trung gian kết nối, định tuyến message | Python (asyncio + websockets) |
-| Client App | Cài trên máy Windows bị điều khiển, thực thi lệnh | C# WPF (.NET) |
+| Client App | Cài trên máy Windows bị điều khiển, thực thi lệnh | Python (PyQt6) |
 
 ---
 
@@ -252,30 +252,29 @@ gateway/
 
 ---
 
-## 7. Client App (C# WPF)
+## 7. Client App (Python PyQt6)
 
 ```
-client-app/RemoteControlClient/
-├── App.xaml / App.xaml.cs        # Entry point, khởi tạo GatewayService khi start
-├── Models/
-│   ├── MachineInfo.cs            # Thông tin máy: MachineId, MachineName, IpAddress, OsVersion
-│   └── CommandMessage.cs         # Cấu trúc message: Type, MachineId, Payload
-├── Services/
-│   ├── GatewayService.cs         # Kết nối WebSocket đến Gateway, gửi/nhận message
-│   └── PermissionService.cs      # Quản lý trạng thái permission (AlwaysAsk/Allow/Deny)
-├── Modules/                       # Mỗi module 1 class, implement ExecuteAsync(payload)
-│   ├── ApplicationsModule.cs
-│   ├── ProcessesModule.cs
-│   ├── ScreenshotModule.cs
-│   ├── LiveScreenModule.cs
-│   ├── KeyLoggerModule.cs
-│   ├── FileDownloadModule.cs
-│   ├── WebcamModule.cs
-│   └── PowerControlModule.cs
-└── Views/
-    ├── MainWindow.xaml(.cs)              # Màn hình chính: trạng thái kết nối
-    ├── PermissionSettingsWindow.xaml     # Cấu hình quyền cho 8 module
-    └── PermissionPopupWindow.xaml        # Popup xin phép real-time
+client-app/
+├── main.py                       # Entry point, khởi tạo QThread + PyQt6 App
+├── config.py                     # Cấu hình Gateway URL, Machine ID, Sandbox Path
+├── core/
+│   ├── gateway_service.py        # Duy trì WebSocket & Heartbeat (QThread + asyncio)
+│   ├── permission_service.py     # Quản lý luồng xin quyền (ASK/ALLOW/DENY)
+│   └── command_handler.py        # Điều phối lệnh từ Gateway đến đúng module
+├── modules/                       # 8 module xử lý tác vụ trên Windows
+│   ├── applications.py
+│   ├── processes.py
+│   ├── screenshot.py
+│   ├── live_screen.py
+│   ├── keylogger.py
+│   ├── file_manager.py           # Giới hạn trong thư mục Sandbox
+│   ├── webcam.py                 # Chạy camera & gọi đèn chớp đỏ
+│   └── power_control.py
+└── ui/                           # Giao diện Client Agent (PyQt6)
+    ├── main_window.py            # Hiển thị trạng thái kết nối
+    ├── permission_popup.py       # Popup xin quyền End-User (Always-on-Top, 15s timeout)
+    └── red_indicator.py          # Cửa sổ chấm đỏ cảnh báo Webcam
 ```
 
 **Vai trò chính:**
@@ -312,7 +311,7 @@ client-app/RemoteControlClient/
 | Web Backend | Python | FastAPI, websockets, python-jose (JWT), passlib |
 | Web Frontend | JavaScript | React, Vite, React Router, Axios |
 | Gateway | Python | asyncio, websockets |
-| Client App | C# (.NET) | WPF, System.Net.WebSockets (hoặc thư viện tương đương) |
+| Client App | Python | PyQt6, websockets, psutil, opencv-python, mss, pynput |
 
 ---
 
