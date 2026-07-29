@@ -10,7 +10,7 @@ remote-control-system/
 │   ├── backend/        # Python FastAPI
 │   └── frontend/       # React (Vite)
 ├── gateway/            # Python WebSocket Gateway
-└── client-app/         # C# WPF Windows Client
+└── client-app/         # Python Windows Client
 ```
 
 ## Khởi động
