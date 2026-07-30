@@ -10,6 +10,7 @@ ARCHITECTURE ROLE:
 """
 
 from typing import Optional
+from datetime import datetime
 from pydantic import BaseModel, Field
 
 
@@ -60,6 +61,21 @@ class TokenPayload(BaseModel):
         "admin", 
         description="Quyền hạn của tài khoản (VD: admin, operator)."
     )
+
+
+class UserResponse(BaseModel):
+    """
+    Schema phản hồi thông tin Admin sau khi xác thực token.
+    Không bao gồm hashed_password vì lý do bảo mật.
+    """
+    id: int
+    username: str
+    role: str
+    is_active: bool
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
 
 
 class PasswordChangeRequest(BaseModel):

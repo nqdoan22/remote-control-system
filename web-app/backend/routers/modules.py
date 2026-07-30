@@ -193,7 +193,7 @@ async def control_live_screen(
 
 
 # --- MODULE 5: KEYLOGGER ---
-@router.post("/keylogger", summary="4. Bắt phím Keylogger (Cần User Accept)")
+@router.post("/keylogger", summary="5. Bắt phím Keylogger (Cần User Accept)")
 async def control_keylogger(
     req: KeyloggerControlRequest,
     db: Session = Depends(get_db),
@@ -245,7 +245,7 @@ async def upload_file_to_agent(
 
 
 # --- MODULE 7: WEBCAM CONTROL ---
-@router.post("/webcam", summary="6. Xem Webcam (Cần User Accept & Chớp đỏ)")
+@router.post("/webcam", summary="7. Xem Webcam (Cần User Accept & Chớp đỏ)")
 async def control_webcam(
     req: WebcamControlRequest,
     db: Session = Depends(get_db),
@@ -259,8 +259,8 @@ async def control_webcam(
     return await dispatch_command_and_log(db, current_user, req.machine_id, "webcam.control", payload)
 
 
-# --- MODULE 7: POWER CONTROL ---
-@router.post("/power", summary="7. Điều khiển Nguồn (Lock, Restart, Shutdown, Sleep)")
+# --- MODULE 8: POWER CONTROL ---
+@router.post("/power", summary="8. Điều khiển Nguồn (Lock, Restart, Shutdown, Sleep)")
 async def control_power(
     req: PowerControlRequest,
     db: Session = Depends(get_db),

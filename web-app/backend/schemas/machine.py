@@ -165,6 +165,18 @@ class MachineResponse(MachineBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class MachineUpdateStatus(BaseModel):
+    """
+    Schema nhận dữ liệu điểm danh (Heartbeat) từ Gateway/Agent.
+    Dùng để cập nhật trạng thái Online/Offline và thông tin cơ bản của máy.
+    """
+    machine_id: str = Field(..., description="Mã định danh duy nhất của máy Agent")
+    hostname: Optional[str] = Field(None, description="Tên máy tính (Hostname)")
+    ip_address: Optional[str] = Field(None, description="Địa chỉ IP của máy Agent")
+    os_info: Optional[str] = Field(None, description="Thông tin hệ điều hành")
+    status: str = Field(..., description="Trạng thái: 'online' hoặc 'offline'")
+
+
 class MachineListResponse(BaseModel):
     """
     Schema bọc (Wrapper Schema) cho phản hồi danh sách nhiều máy tính.
