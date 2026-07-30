@@ -1,10 +1,3 @@
-Dưới đây là toàn bộ nội dung file **`SYSTEM_OVERVIEW.md`** đã được tổng hợp, phân tích chuyên sâu và cấu trúc lại theo chuẩn tài liệu kỹ thuật đồ án. Nội dung bao quát đầy đủ từ tổng quan, kiến trúc, bảo mật, giao thức truyền thông, cấu trúc thư mục đến quy trình đánh giá đồ án.
-
-Bạn có thể **sao chép toàn bộ nội dung bên trong khung mã Markdown bên dưới** và dán trực tiếp vào file `SYSTEM_OVERVIEW.md` của mình.
-
----
-
-```markdown
 # SYSTEM OVERVIEW: HỆ THỐNG ĐIỀU KHIỂN VÀ GIÁM SÁT MÁY TÍNH TỪ XA QUAN MẠNG LAN
 
 ---
@@ -349,12 +342,3 @@ Giảng viên sẽ chấm điểm đồ án dựa trên các bước nghiêm ng�
 
 ---
 
-### 💡 Hướng dẫn nhanh để bạn hiểu và thuyết trình đồ án:
-
-1. **Về mặt Mạng máy tính (Computer Networks):** Đồ án dùng **WebSocket** truyền tin qua giao thức TCP (Port 8765). WebSocket giúp duy trì kết nối hai chiều liên tục (Full-duplex), giảm thiểu chi phí bắt tay (Handshake) so với HTTP REST API thông thường, đạt độ trễ nhỏ hơn 500ms.
-
-
-2. **Về mặt Kiến trúc (Architecture):** Mô hình **3-Tier** tách biệt Web Server, Gateway Broker và Agent Client giúp hệ thống không bị thắt nút cổ chai (Bottleneck) và dễ mở rộng.
-
-
-3. **Về mặt Bảo mật & An toàn (Security & Safety):** Điểm sáng lớn nhất khi thuyết trình là nhấn mạnh vào **Explicit Consent (Popup 15s)**, **Directory Sandboxing** và **Bcrypt + JWT Authentication**. Đồ án không chỉ dừng lại ở việc làm được chức năng điều khiển, mà còn thể hiện tư duy an toàn thông tin chuyên nghiệp.
