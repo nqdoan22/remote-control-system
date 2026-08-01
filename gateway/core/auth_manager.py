@@ -6,6 +6,7 @@ Theo security_design.md:
   - Web App: validate JWT token bằng JWT_SECRET (HS256)
 """
 
+import hmac
 import logging
 import jwt
 
@@ -41,7 +42,7 @@ def validate_client(machine_id: str, machine_secret: str) -> tuple[bool, str]:
         logger.warning("Auth failed: unknown machineId '%s'", machine_id)
         return False, "Unknown machineId"
 
-    if expected_secret != machine_secret:
+    if not hmac.compare_digest(expected_secret, machine_secret):
         logger.warning("Auth failed: wrong machineSecret for machineId '%s'", machine_id)
         return False, "Invalid machineSecret"
 

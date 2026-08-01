@@ -27,9 +27,10 @@ class ConnectionManager:
 
         self.registry = MachineRegistry()
 
-        # PermissionManager — được gán sau khi khởi tạo từ main.py
+        # PermissionManager / CommandTracker — được gán sau khi khởi tạo từ main.py
         # để tránh circular import
         self.permission_manager = None
+        self.command_tracker = None
 
     # ------------------------------------------------------------------
     # Client App

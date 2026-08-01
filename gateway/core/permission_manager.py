@@ -36,7 +36,6 @@ class PendingPermission:
         "permission_id",
         "machine_id",
         "feature",
-        "original_message",
         "requested_by",
         "event",
         "granted",
@@ -47,13 +46,11 @@ class PendingPermission:
         permission_id: str,
         machine_id: str,
         feature: str,
-        original_message: dict,
         requested_by: str,
     ):
         self.permission_id = permission_id
         self.machine_id = machine_id
         self.feature = feature
-        self.original_message = original_message
         self.requested_by = requested_by
         self.event = asyncio.Event()  # set khi nhận permission.response
         self.granted: bool | None = None  # None = chưa có response
@@ -100,7 +97,6 @@ class PermissionManager:
             permission_id=permission_id,
             machine_id=machine_id,
             feature=feature,
-            original_message=original_message,
             requested_by=requested_by,
         )
         self._pending[permission_id] = pending

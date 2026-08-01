@@ -11,9 +11,11 @@ Trách nhiệm theo system_architecture.md:
 Không xử lý Business Logic — chỉ route đúng nơi.
 """
 
+import asyncio
 import logging
 
 import config
+from core.command_tracker import CommandTracker
 from core.connection_manager import ConnectionManager
 from core.permission_manager import PermissionManager
 from models.message import (
@@ -22,7 +24,6 @@ from models.message import (
     get_type,
     get_payload,
     get_message_id,
-    get_destination,
 )
 
 logger = logging.getLogger("gateway.message_router")
@@ -64,6 +65,9 @@ _WEBAPP_ALLOWED_TYPES: frozenset[str] = frozenset({
 })
 
 # Message types chỉ Client App được phép gửi (Response/Event direction: machine → webapp)
+# "machine.status" không nằm trong danh sách này — đó là event Gateway tự sinh ra
+# để notify Web App (xem ConnectionManager._notify_machine_status), Client App
+# không bao giờ gửi loại message này.
 _CLIENT_ALLOWED_TYPES: frozenset[str] = frozenset({
     "response",
     "error",
@@ -72,7 +76,6 @@ _CLIENT_ALLOWED_TYPES: frozenset[str] = frozenset({
     "webcam.frame",
     "keylogger.data",
     "permission.response",
-    "machine.status",
 })
 
 # Message types được xử lý tại Gateway, không forward xuống Client App
@@ -92,6 +95,7 @@ async def route_from_webapp(
     manager: ConnectionManager,
     permission_manager: "PermissionManager | None" = None,
     admin_user: str = "unknown",
+    command_tracker: "CommandTracker | None" = None,
 ) -> None:
     """
     Xử lý message gửi từ Web App.
@@ -173,6 +177,42 @@ async def route_from_webapp(
         await manager.send_to_webapp(
             make_error("MACHINE_OFFLINE", f"Failed to deliver to '{machine_id}'.", original_message_id=msg_id)
         )
+        return
+
+    # Theo dõi TIMEOUT: nếu Client App không phản hồi (response/error) trong
+    # COMMAND_TIMEOUT giây, báo lỗi TIMEOUT về Web App. Chạy nền để không
+    # chặn việc xử lý các message tiếp theo từ Web App.
+    if command_tracker is not None:
+        event = command_tracker.track(machine_id, msg_id)
+        asyncio.create_task(
+            _watch_command_timeout(command_tracker, manager, machine_id, msg_id, event)
+        )
+
+
+async def _watch_command_timeout(
+    command_tracker: CommandTracker,
+    manager: ConnectionManager,
+    machine_id: str,
+    message_id: str,
+    event: asyncio.Event,
+) -> None:
+    """Chờ response/error từ machine; nếu hết COMMAND_TIMEOUT mà chưa có, báo TIMEOUT."""
+    try:
+        await asyncio.wait_for(event.wait(), timeout=config.COMMAND_TIMEOUT)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Command '%s' to machine '%s' timed out waiting for response",
+            message_id, machine_id,
+        )
+        await manager.send_to_webapp(
+            make_error(
+                "TIMEOUT",
+                f"Machine '{machine_id}' did not respond in time.",
+                original_message_id=message_id,
+            )
+        )
+    finally:
+        command_tracker.clear(machine_id, message_id)
 
 
 async def route_from_client(
@@ -180,6 +220,7 @@ async def route_from_client(
     machine_id: str,
     manager: ConnectionManager,
     permission_manager: "PermissionManager | None" = None,
+    command_tracker: "CommandTracker | None" = None,
 ) -> None:
     """
     Xử lý message gửi từ Client App.
@@ -215,6 +256,11 @@ async def route_from_client(
                     "permission.response from '%s' missing permissionId", machine_id
                 )
         return
+
+    # response / error — đánh dấu command tương ứng đã được giải quyết
+    # (unblock CommandTracker để không báo TIMEOUT giả)
+    if msg_type in ("response", "error") and command_tracker is not None:
+        command_tracker.resolve(machine_id)
 
     # response / error / frame / keylogger.data — forward lên Web App
     forward_message = {**message, "source": machine_id, "destination": "webapp"}

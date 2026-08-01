@@ -17,6 +17,7 @@ from websockets.server import WebSocketServerProtocol
 
 from core.auth_manager import validate_client
 from core.connection_manager import ConnectionManager
+from core.rate_limiter import client_auth_limiter
 from handlers.message_router import route_from_client
 from models.message import (
     make_response,
@@ -37,8 +38,21 @@ async def handle_client(websocket: WebSocketServerProtocol, manager: ConnectionM
     """Entry point cho kết nối từ Client App."""
     remote = websocket.remote_address
     machine_id: str | None = None
+    remote_ip = str(remote[0]) if remote else "unknown"
 
     try:
+        # ------------------------------------------------------------------
+        # Bước 0: Chặn IP đã thất bại quá nhiều lần (chống brute-force machineSecret)
+        # ------------------------------------------------------------------
+        if client_auth_limiter.is_locked_out(remote_ip):
+            logger.warning("Client %s locked out due to repeated auth failures", remote)
+            await _send(websocket, make_error(
+                "AUTHENTICATION_FAILED",
+                "Too many failed authentication attempts. Try again later.",
+            ))
+            await websocket.close(code=4001, reason="Too many failed attempts")
+            return
+
         # ------------------------------------------------------------------
         # Bước 1: Chờ message auth.client đầu tiên
         # ------------------------------------------------------------------
@@ -95,6 +109,7 @@ async def handle_client(websocket: WebSocketServerProtocol, manager: ConnectionM
         auth_ok, auth_reason = validate_client(m_id, m_secret)
 
         if not auth_ok:
+            client_auth_limiter.record_failure(remote_ip)
             logger.warning(
                 "Client %s authentication failed: %s", remote, auth_reason
             )
@@ -108,6 +123,8 @@ async def handle_client(websocket: WebSocketServerProtocol, manager: ConnectionM
             )
             await websocket.close(code=4001, reason="Authentication failed")
             return
+
+        client_auth_limiter.record_success(remote_ip)
 
         # ------------------------------------------------------------------
         # Bước 4: Xác thực thành công
@@ -154,7 +171,9 @@ async def handle_client(websocket: WebSocketServerProtocol, manager: ConnectionM
             msg_type = get_type(message)
             logger.debug("Received '%s' from machine '%s'", msg_type, machine_id)
 
-            await route_from_client(message, machine_id, manager, manager.permission_manager)
+            await route_from_client(
+                message, machine_id, manager, manager.permission_manager, manager.command_tracker
+            )
 
     except websockets.exceptions.ConnectionClosed as exc:
         logger.info("Client '%s' (%s) disconnected: %s", machine_id or "unauthenticated", remote, exc)

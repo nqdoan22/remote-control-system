@@ -55,6 +55,24 @@ HEARTBEAT_TIMEOUT: int = int(os.getenv("HEARTBEAT_TIMEOUT", "45"))
 HEARTBEAT_CHECK_INTERVAL: int = 5
 
 # ---------------------------------------------------------------------------
+# Command Timeout
+# ---------------------------------------------------------------------------
+
+# Giây — Nếu Client App không phản hồi (response/error) cho một command trong
+# khoảng thời gian này → Gateway trả lỗi TIMEOUT cho Web App.
+COMMAND_TIMEOUT: int = int(os.getenv("COMMAND_TIMEOUT", "15"))
+
+# ---------------------------------------------------------------------------
+# Auth Rate Limiting
+# ---------------------------------------------------------------------------
+
+# Số lần auth.client sai liên tiếp tối đa từ cùng một IP trước khi bị khóa tạm thời.
+AUTH_MAX_ATTEMPTS: int = int(os.getenv("AUTH_MAX_ATTEMPTS", "5"))
+
+# Giây — Thời gian khóa sau khi vượt quá AUTH_MAX_ATTEMPTS.
+AUTH_LOCKOUT_SECONDS: float = float(os.getenv("AUTH_LOCKOUT_SECONDS", "60"))
+
+# ---------------------------------------------------------------------------
 # Permission Confirmation
 # ---------------------------------------------------------------------------
 

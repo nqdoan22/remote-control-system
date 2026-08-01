@@ -143,7 +143,13 @@ async def handle_webapp(websocket: WebSocketServerProtocol, manager: ConnectionM
             msg_type = get_type(message)
             logger.debug("Received '%s' from Web App (admin='%s')", msg_type, admin_user)
 
-            await route_from_webapp(message, manager, manager.permission_manager, admin_user or "unknown")
+            await route_from_webapp(
+                message,
+                manager,
+                manager.permission_manager,
+                admin_user or "unknown",
+                manager.command_tracker,
+            )
 
     except websockets.exceptions.ConnectionClosed as exc:
         logger.info(

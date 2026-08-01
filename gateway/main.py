@@ -16,6 +16,7 @@ import websockets
 from websockets.server import WebSocketServerProtocol
 
 import config
+from core.command_tracker import CommandTracker
 from core.connection_manager import ConnectionManager
 from core.heartbeat_manager import start_heartbeat
 from core.permission_manager import PermissionManager
@@ -39,6 +40,7 @@ logger = logging.getLogger("gateway")
 
 manager = ConnectionManager()
 manager.permission_manager = PermissionManager()
+manager.command_tracker = CommandTracker()
 
 # ---------------------------------------------------------------------------
 # Router — phân biệt /client và /webapp theo path
@@ -49,7 +51,7 @@ async def router(websocket: WebSocketServerProtocol):
     Nhận kết nối WebSocket và điều hướng đến đúng handler
     dựa trên request path.
     """
-    path = websocket.request.path
+    path = websocket.path
 
     if path == "/client":
         logger.info("New Client App connection from %s", websocket.remote_address)
