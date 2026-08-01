@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     # Thời gian chờ (Timeout) phản hồi lệnh từ Gateway/Client Agent (giây)
     COMMAND_TIMEOUT_SECONDS: int = 15
 
+    # Timeout riêng cho các lệnh thuộc Sensitive Feature List (screen.live.start,
+    # webcam.start, keylogger.start, power.*). Theo api_contract.md, Gateway có thể
+    # chờ Permission Confirmation từ End User tối đa PERMISSION_TIMEOUT = 30s trước
+    # khi trả lời -> phải chờ lâu hơn con số đó để không timeout hụt phía Backend.
+    SENSITIVE_COMMAND_TIMEOUT_SECONDS: int = 35
+
     # -------------------------------------------------------------------------
     # 5. CẤU HÌNH TÊN MIỀN CHO PHÉP TRUY CẬP (CORS ORIGINS)
     # Phục vụ kết nối REST API từ Frontend (ReactJS / Vite / NextJS)

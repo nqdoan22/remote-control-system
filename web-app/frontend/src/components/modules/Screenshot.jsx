@@ -1,66 +1,51 @@
 import React, { useState, useEffect } from 'react';
+import { takeScreenshotApi, isWsError, getWsErrorMessage, getWsData } from '../../services/api';
 
 /**
- * Screenshot Module - Chụp ảnh màn hình máy Client (Có yêu cầu xin phép người dùng)
- * 
+ * Screenshot Module - Chụp ảnh màn hình máy Client.
+ * screen.screenshot KHÔNG nằm trong Sensitive Feature List (api_contract.md),
+ * nên không cần Popup xin quyền / không có PERMISSION_TIMEOUT.
+ *
  * @param {Object} selectedMachine - Thông tin máy Client được chọn
- * @param {Function} onSendMessage - Hàm gửi WebSocket message đến Gateway
- * @param {Object} lastMessage - Phản hồi nhận từ Gateway
  */
-const Screenshot = ({ selectedMachine, onSendMessage, lastMessage }) => {
-  // ===== STATE QUẢN LÝ GIAO DIỆN =====
+const Screenshot = ({ selectedMachine }) => {
   const [imageData, setImageData] = useState(null); // Chuỗi ảnh Base64 (data:image/jpeg;base64,...)
   const [loading, setLoading] = useState(false);
-  const [capturedAt, setCapturedAt] = useState(null); // Thời gian chụp
-  const [consentStatus, setConsentStatus] = useState(''); // Trạng thái xin quyền ('waiting', 'rejected', 'timeout', '')
+  const [capturedAt, setCapturedAt] = useState(null);
+  const [errorMsg, setErrorMsg] = useState('');
 
   // Reset dữ liệu ảnh khi Admin đổi sang máy Client khác
   useEffect(() => {
     setImageData(null);
     setCapturedAt(null);
-    setConsentStatus('');
+    setErrorMsg('');
     setLoading(false);
   }, [selectedMachine]);
 
-  // ===== LẮNG NGHE PHẢN HỒI TỪ WEBSOCKET =====
-  useEffect(() => {
-    if (!lastMessage) return;
-
-    if (lastMessage.action === 'take_screenshot_response') {
-      setLoading(false);
-
-      if (lastMessage.status === 'success') {
-        // Nhận được dữ liệu ảnh thành công
-        setImageData(`data:image/jpeg;base64,${lastMessage.data.image_base64}`);
-        setCapturedAt(new Date().toLocaleTimeString('vi-VN'));
-        setConsentStatus('approved');
-      } else if (lastMessage.status === 'rejected') {
-        // Người dùng Client bấm từ chối Consent
-        setConsentStatus('rejected');
-        alert('❌ Người dùng trên máy Client đã TỪ CHỐI cấp quyền chụp màn hình!');
-      } else if (lastMessage.status === 'timeout') {
-        // Hết 15s timeout người dùng không tương tác -> Tự động từ chối
-        setConsentStatus('timeout');
-        alert('⏱️ Yêu cầu xin quyền đã HẾT HẠN (Timeout 15s)!');
-      } else {
-        alert('Lỗi chụp màn hình: ' + (lastMessage.message || 'Không xác định'));
-      }
-    }
-  }, [lastMessage]);
-
-  // Gửi lệnh yêu cầu chụp màn hình
-  const handleTakeScreenshot = () => {
+  const handleTakeScreenshot = async () => {
     if (!selectedMachine) return;
     setLoading(true);
-    setConsentStatus('waiting');
-    
-    onSendMessage({
-      target_machine_id: selectedMachine.machineId,
-      action: 'take_screenshot'
-    });
+    setErrorMsg('');
+
+    try {
+      // REST -> Backend -> Gateway (screen.screenshot) -> Client App
+      const res = await takeScreenshotApi(selectedMachine.machineId);
+
+      if (isWsError(res)) {
+        setErrorMsg(getWsErrorMessage(res));
+      } else {
+        const data = getWsData(res); // { image, width, height, timestamp } theo api_contract.md
+        setImageData(`data:image/jpeg;base64,${data.image}`);
+        setCapturedAt(new Date().toLocaleTimeString('vi-VN'));
+      }
+    } catch (err) {
+      // Lỗi hạ tầng (machine offline, gateway lỗi...) -> HTTPException từ backend
+      setErrorMsg(err?.detail || 'Không thể chụp màn hình. Vui lòng thử lại.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // Hàm tải ảnh về máy Admin
   const handleDownloadImage = () => {
     if (!imageData) return;
     const link = document.createElement('a');
@@ -73,15 +58,14 @@ const Screenshot = ({ selectedMachine, onSendMessage, lastMessage }) => {
 
   return (
     <div style={styles.container}>
-      {/* THANH ĐIỀU HƯỚNG BẤM CHỤP & THÔNG TIN */}
       <div style={styles.topBar}>
         <div style={styles.actionGroup}>
-          <button 
-            onClick={handleTakeScreenshot} 
+          <button
+            onClick={handleTakeScreenshot}
             disabled={loading}
             style={styles.btnPrimary}
           >
-            {loading ? '⏳ Đang chờ người dùng đồng ý...' : '📸 Chụp Màn Hình Ngay'}
+            {loading ? '⏳ Đang chụp...' : '📸 Chụp Màn Hình Ngay'}
           </button>
 
           {imageData && (
@@ -98,18 +82,13 @@ const Screenshot = ({ selectedMachine, onSendMessage, lastMessage }) => {
         )}
       </div>
 
-      {/* BANNER BÁO VỀ CƠ CHẾ XIN QUYỀN (PRIVACY CONSENT) */}
-      <div style={styles.consentNotice}>
-        ℹ️ <b>Lưu ý An toàn & Bảo mật:</b> Lệnh này sẽ hiển thị Popup xin quyền trên màn hình Client trong <b>15 giây</b>. Ảnh chỉ được gửi về khi End-User đồng ý.
-      </div>
+      {errorMsg && <div style={styles.errorBanner}>⚠️ {errorMsg}</div>}
 
-      {/* KHU VỰC HIỂN THỊ HÌNH ẢNH (IMAGE CONTAINER) */}
       <div style={styles.imageViewer}>
         {loading && (
           <div style={styles.statusBox}>
             <div style={{ fontSize: '2.5rem' }}>⏳</div>
-            <h4>Đang gửi Popup xin phép đến máy {selectedMachine?.hostname}...</h4>
-            <p style={{ color: '#94a3b8' }}>Chờ người dùng nhấn "Chấp nhận" trên cửa sổ Client[cite: 1, 2, 5].</p>
+            <h4>Đang chụp màn hình {selectedMachine?.hostname}...</h4>
           </div>
         )}
 
@@ -122,10 +101,10 @@ const Screenshot = ({ selectedMachine, onSendMessage, lastMessage }) => {
 
         {!loading && imageData && (
           <div style={styles.imageWrapper}>
-            <img 
-              src={imageData} 
-              alt="Client Screenshot" 
-              style={styles.responsiveImage} 
+            <img
+              src={imageData}
+              alt="Client Screenshot"
+              style={styles.responsiveImage}
             />
           </div>
         )}
@@ -141,7 +120,7 @@ const styles = {
   btnPrimary: { padding: '10px 18px', backgroundColor: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' },
   btnSuccess: { padding: '10px 18px', backgroundColor: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' },
   timeInfo: { fontSize: '0.9rem', color: '#cbd5e1' },
-  consentNotice: { padding: '10px 14px', backgroundColor: '#1e293b', borderLeft: '4px solid #f59e0b', borderRadius: '4px', fontSize: '0.85rem', color: '#fef08a' },
+  errorBanner: { padding: '10px 14px', backgroundColor: '#1e293b', borderLeft: '4px solid #ef4444', borderRadius: '4px', fontSize: '0.85rem', color: '#fca5a5' },
   imageViewer: { flex: 1, backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', padding: '12px' },
   statusBox: { textAlign: 'center', color: '#f8fafc' },
   placeholder: { textAlign: 'center', color: '#64748b' },

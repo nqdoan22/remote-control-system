@@ -1,69 +1,55 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { controlLiveScreenApi, isWsError, getWsErrorMessage } from '../../services/api';
 
 /**
- * LiveScreen Module - Stream màn hình máy Client theo thời gian thực (Real-time Screen Stream)
- * 
+ * LiveScreen Module - Stream màn hình máy Client theo thời gian thực.
+ * screen.live.start / screen.live.stop qua REST (Gateway tự chặn lại để xin
+ * Permission Confirmation - Sensitive Feature List). Frame (screen.live.frame)
+ * nhận qua kênh WebSocket broadcast (lastMessage), KHÔNG qua REST.
+ *
  * @param {Object} selectedMachine - Thông tin máy Client đang chọn
- * @param {Function} onSendMessage - Hàm gửi WebSocket message đến Gateway
- * @param {Object} lastMessage - Khung hình hoặc phản hồi nhận từ WebSocket
+ * @param {Object} lastMessage - Message mới nhất từ WebSocket bridge: { type, payload }
  */
-const LiveScreen = ({ selectedMachine, onSendMessage, lastMessage }) => {
-  // ===== STATE QUẢN LÝ LUỒNG STREAM =====
+const LiveScreen = ({ selectedMachine, lastMessage }) => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [loading, setLoading] = useState(false);
   const [currentFrame, setCurrentFrame] = useState(null);
-  const [fps, setFps] = useState(10); // Cấu hình FPS mặc định (5 - 15 FPS)
-  const [realtimeFps, setRealtimeFps] = useState(0); // Đo FPS thực tế nhận được
+  const [fps, setFps] = useState(10);
+  const [realtimeFps, setRealtimeFps] = useState(0);
 
-  // Reference để tính toán FPS thực tế
   const frameCountRef = useRef(0);
   const lastFpsCalcTimeRef = useRef(Date.now());
+  const isStreamingRef = useRef(false); // đọc được giá trị mới nhất trong cleanup unmount
 
-  // Reset luồng Stream khi Admin chuyển đổi sang máy Client khác
-  useEffect(() => {
-    if (isStreaming) {
-      stopStreaming();
-    }
-    setCurrentFrame(null);
+  const stopStreaming = async (silent = false) => {
     setIsStreaming(false);
+    isStreamingRef.current = false;
     setLoading(false);
-  }, [selectedMachine]);
+    setRealtimeFps(0);
+    if (!selectedMachine) return;
+    try {
+      await controlLiveScreenApi(selectedMachine.machineId, 'stop');
+    } catch (err) {
+      if (!silent) alert('Lỗi dừng Live Screen: ' + (err?.detail || 'Không rõ nguyên nhân'));
+    }
+  };
 
-  // CLEANUP: Tự động ngắt Stream khi Admin chuyển sang Tab Module khác (Chống lãng phí băng thông)
+  // Reset luồng Stream khi Admin chuyển đổi sang máy Client khác / rời trang
   useEffect(() => {
     return () => {
-      if (isStreaming) {
-        onSendMessage({
-          target_machine_id: selectedMachine?.machineId,
-          action: 'stop_live_screen'
-        });
-      }
+      if (isStreamingRef.current) stopStreaming(true);
     };
-  }, [isStreaming, selectedMachine]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMachine]);
 
-  // ===== LẮNG NGHE KHUNG HÌNH TRẢ VỀ TỪ WEBSOCKET =====
+  // Lắng nghe frame phát về từ Gateway (broadcast theo machine_id)
   useEffect(() => {
-    if (!lastMessage) return;
+    if (!lastMessage || !isStreaming) return;
 
-    // 1. Phản hồi xác nhận lệnh Bắt đầu/Dừng Stream
-    if (lastMessage.action === 'start_live_screen_response') {
-      setLoading(false);
-      if (lastMessage.status === 'success') {
-        setIsStreaming(true);
-      } else if (lastMessage.status === 'rejected') {
-        alert('❌ Người dùng trên máy Client đã TỪ CHỐI cấp quyền xem Live Screen![cite: 1, 2, 5]');
-      } else if (lastMessage.status === 'timeout') {
-        alert('⏱️ Yêu cầu xin quyền đã HẾT HẠN (Timeout 15s)![cite: 1, 2, 5, 7]');
-      } else {
-        alert('Lỗi bắt đầu Live Screen: ' + lastMessage.message);
-      }
-    }
+    if (lastMessage.type === 'screen.live.frame') {
+      const { image } = lastMessage.payload || {};
+      if (image) setCurrentFrame(`data:image/jpeg;base64,${image}`);
 
-    // 2. Nhận từng Khung hình Stream (Frame Payload)
-    if (lastMessage.action === 'live_screen_frame' && isStreaming) {
-      setCurrentFrame(`data:image/jpeg;base64,${lastMessage.data.image_base64}`);
-      
-      // Tính toán FPS thực tế
       frameCountRef.current += 1;
       const now = Date.now();
       if (now - lastFpsCalcTimeRef.current >= 1000) {
@@ -74,51 +60,47 @@ const LiveScreen = ({ selectedMachine, onSendMessage, lastMessage }) => {
     }
   }, [lastMessage, isStreaming]);
 
-  // Gửi lệnh Bắt đầu Stream
-  const startStreaming = () => {
+  const startStreaming = async () => {
     if (!selectedMachine) return;
     setLoading(true);
-    onSendMessage({
-      target_machine_id: selectedMachine.machineId,
-      action: 'start_live_screen',
-      payload: { target_fps: fps }
-    });
-  };
-
-  // Gửi lệnh Dừng Stream
-  const stopStreaming = () => {
-    setIsStreaming(false);
-    setLoading(false);
-    setRealtimeFps(0);
-    onSendMessage({
-      target_machine_id: selectedMachine?.machineId,
-      action: 'stop_live_screen'
-    });
+    try {
+      // Gateway sẽ chặn lại chờ Permission Confirmation (tối đa 30s) trước khi trả response
+      const res = await controlLiveScreenApi(selectedMachine.machineId, 'start', fps);
+      setLoading(false);
+      if (isWsError(res)) {
+        alert(getWsErrorMessage(res));
+      } else {
+        setIsStreaming(true);
+        isStreamingRef.current = true;
+      }
+    } catch (err) {
+      setLoading(false);
+      alert('Lỗi bắt đầu Live Screen: ' + (err?.detail || 'Không rõ nguyên nhân'));
+    }
   };
 
   return (
     <div style={styles.container}>
-      {/* THANH CẤU HÌNH VÀ BẤM BẮT ĐẦU / DỪNG */}
       <div style={styles.topBar}>
         <div style={styles.controlsGroup}>
           {!isStreaming ? (
-            <button 
-              onClick={startStreaming} 
+            <button
+              onClick={startStreaming}
               disabled={loading}
               style={styles.btnStart}
             >
               {loading ? '⏳ Đang xin phép người dùng Client...' : '▶ Bắt Đầu Stream Live'}
             </button>
           ) : (
-            <button onClick={stopStreaming} style={styles.btnStop}>
+            <button onClick={() => stopStreaming()} style={styles.btnStop}>
               ⏹ Dừng Stream
             </button>
           )}
 
           <div style={styles.fpsSelector}>
             <label style={{ fontSize: '0.85rem' }}>Cấu hình FPS: </label>
-            <select 
-              value={fps} 
+            <select
+              value={fps}
               onChange={(e) => setFps(Number(e.target.value))}
               disabled={isStreaming || loading}
               style={styles.selectInput}
@@ -130,7 +112,6 @@ const LiveScreen = ({ selectedMachine, onSendMessage, lastMessage }) => {
           </div>
         </div>
 
-        {/* THÔNG SỐ TRẠNG THÁI STREAM */}
         {isStreaming && (
           <div style={styles.streamStats}>
             <span style={styles.liveIndicator}>🔴 LIVE</span>
@@ -139,13 +120,12 @@ const LiveScreen = ({ selectedMachine, onSendMessage, lastMessage }) => {
         )}
       </div>
 
-      {/* KHU VỰC HIỂN THỊ LUỒNG VIDEO (STREAM SCREEN) */}
       <div style={styles.videoCanvasWrapper}>
         {loading && (
           <div style={styles.statusBox}>
             <div style={{ fontSize: '2.5rem' }}>⏳</div>
             <h4>Đang gửi yêu cầu và chờ người dùng Client đồng ý...</h4>
-            <p style={{ color: '#94a3b8' }}>Popup sẽ xuất hiện trên màn hình máy bị điều khiển trong 15s[cite: 1, 2, 5, 7].</p>
+            <p style={{ color: '#94a3b8' }}>Popup sẽ xuất hiện trên màn hình máy bị điều khiển trong 30s.</p>
           </div>
         )}
 
@@ -157,10 +137,10 @@ const LiveScreen = ({ selectedMachine, onSendMessage, lastMessage }) => {
         )}
 
         {isStreaming && currentFrame && (
-          <img 
-            src={currentFrame} 
-            alt="Live Screen Stream" 
-            style={styles.streamImage} 
+          <img
+            src={currentFrame}
+            alt="Live Screen Stream"
+            style={styles.streamImage}
           />
         )}
       </div>

@@ -1,68 +1,50 @@
 import React, { useState, useEffect } from 'react';
+import { fileActionApi, uploadFileApi, isWsError, getWsErrorMessage, getWsData } from '../../services/api';
 
 /**
- * FileTransfer Module - Quản lý Cây Thư Mục & Chuyển File Cắt Mảnh (Chunking File Transfer)
+ * FileTransfer Module - Duyệt thư mục Sandbox & Upload/Download tệp.
+ * file.list / file.download / file.upload (api_contract.md) - KHÔNG có cơ chế
+ * chunk theo giao thức: mỗi file tối đa 50MB, truyền base64 trong 1 request/response.
  */
-const FileTransfer = ({ selectedMachine, onSendMessage, lastMessage }) => {
-  // ===== STATE QUẢN LÝ ĐIỀU HƯỚNG CÂY THƯ MỤC =====
-  const [currentPath, setCurrentPath] = useState('C:\\'); // Thư mục mặc định
+const FileTransfer = ({ selectedMachine }) => {
+  const [currentPath, setCurrentPath] = useState('C:\\RemoteControl\\'); // Sandbox mặc định
   const [fileList, setFileList] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [transferStatus, setTransferStatus] = useState('');
 
-  // ===== STATE QUẢN LÝ TIẾN TRÌNH TRUYỀN FILE (CHUNKING) =====
-  const [transferProgress, setTransferProgress] = useState(0); // 0% -> 100%
-  const [transferStatus, setTransferStatus] = useState(''); // Thông báo trạng thái
+  useEffect(() => {
+    setCurrentPath('C:\\RemoteControl\\');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMachine]);
 
-  // Lấy danh sách File/Thư mục khi đổi đường dẫn hoặc chọn máy mới
   useEffect(() => {
     fetchDirectoryContent(currentPath);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMachine, currentPath]);
 
-  // LẮNG NGHE PHẢN HỒI DỮ LIỆU FILE VÀ TIẾN TRÌNH TỪ WEBSOCKET
-  useEffect(() => {
-    if (!lastMessage) return;
-
-    // 1. Phản hồi Lấy danh sách file trong thư mục[cite: 1, 6, 7]
-    if (lastMessage.action === 'list_directory_response') {
-      setLoading(false);
-      if (lastMessage.status === 'success') {
-        setFileList(lastMessage.data.items || []);
-      } else {
-        alert('Không thể mở thư mục: ' + lastMessage.message);
-      }
-    }
-
-    // 2. Nhận từng mảnh Chunk File Tải từ Client về Admin (Download)
-    if (lastMessage.action === 'download_file_chunk') {
-      const { chunk_index, total_chunks, data_base64, file_name } = lastMessage.payload;
-      const progress = Math.round(((chunk_index + 1) / total_chunks) * 100);
-      setTransferProgress(progress);
-      setTransferStatus(`Đang tải file "${file_name}": ${progress}% (${chunk_index + 1}/${total_chunks} chunks)`);
-
-      // Khi đã nhận đủ 100% các mảnh
-      if (chunk_index + 1 === total_chunks) {
-        setTransferStatus('🎉 Tải file hoàn tất!');
-        setTimeout(() => setTransferProgress(0), 3000);
-      }
-    }
-  }, [lastMessage]);
-
-  // Gửi lệnh lấy danh sách File/Thư mục
-  const fetchDirectoryContent = (path) => {
+  // Lấy danh sách File/Thư mục (file.list)
+  const fetchDirectoryContent = async (path) => {
     if (!selectedMachine) return;
     setLoading(true);
-    onSendMessage({
-      target_machine_id: selectedMachine.machineId,
-      action: 'list_directory',
-      payload: { path: path }
-    });
+    try {
+      const res = await fileActionApi(selectedMachine.machineId, 'list', path);
+      if (isWsError(res)) {
+        alert('Không thể mở thư mục: ' + getWsErrorMessage(res));
+      } else {
+        // payload.data.entries: [{ name, type: 'file'|'directory', sizeBytes, modifiedAt }]
+        setFileList(getWsData(res).entries || []);
+      }
+    } catch (err) {
+      alert('Không thể mở thư mục: ' + (err?.detail || 'Không rõ nguyên nhân'));
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // Điều hướng chuyển thư mục con hoặc quay lại thư mục cha
   const handleItemClick = (item) => {
-    if (item.is_directory) {
-      const newPath = currentPath.endsWith('\\') 
-        ? `${currentPath}${item.name}` 
+    if (item.type === 'directory') {
+      const newPath = currentPath.endsWith('\\')
+        ? `${currentPath}${item.name}`
         : `${currentPath}\\${item.name}`;
       setCurrentPath(newPath);
     }
@@ -76,75 +58,69 @@ const FileTransfer = ({ selectedMachine, onSendMessage, lastMessage }) => {
     }
   };
 
-  // 📥 TẢI FILE TỪ CLIENT VỀ ADMIN (DOWNLOAD WITH CHUNKING)
-  const handleDownloadFile = (fileName) => {
+  // 📥 TẢI FILE TỪ CLIENT VỀ ADMIN (file.download - single shot, tối đa 50MB)
+  const handleDownloadFile = async (fileName) => {
+    if (!selectedMachine) return;
     const fullFilePath = currentPath.endsWith('\\') ? `${currentPath}${fileName}` : `${currentPath}\\${fileName}`;
-    setTransferProgress(1);
-    setTransferStatus(`Khởi tạo tiến trình tải file: ${fileName}...`);
+    setTransferStatus(`Đang tải file "${fileName}" từ Client...`);
 
-    onSendMessage({
-      target_machine_id: selectedMachine.machineId,
-      action: 'request_download_file',
-      payload: { file_path: fullFilePath, chunk_size: 64 * 1024 } // Mảnh 64KB
-    });
+    try {
+      const res = await fileActionApi(selectedMachine.machineId, 'download', fullFilePath);
+      if (isWsError(res)) {
+        setTransferStatus('');
+        alert('Lỗi tải file: ' + getWsErrorMessage(res));
+        return;
+      }
+      // payload.data: { filename, content (base64), sizeBytes, mimeType }
+      const { filename, content, mimeType } = getWsData(res);
+      const link = document.createElement('a');
+      link.href = `data:${mimeType || 'application/octet-stream'};base64,${content}`;
+      link.download = filename || fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTransferStatus('🎉 Tải file hoàn tất!');
+      setTimeout(() => setTransferStatus(''), 3000);
+    } catch (err) {
+      setTransferStatus('');
+      alert('Lỗi tải file: ' + (err?.detail || 'File có thể vượt quá 50MB hoặc quá thời gian chờ.'));
+    }
   };
 
-  // 📤 TẢI FILE TỪ ADMIN LÊN CLIENT (UPLOAD WITH CHUNKING)
-  const handleFileUploadSelect = (e) => {
+  // 📤 TẢI FILE TỪ ADMIN LÊN CLIENT (file.upload - multipart REST, backend tự encode base64)
+  const handleFileUploadSelect = async (e) => {
     const file = e.target.files[0];
+    e.target.value = ''; // cho phép chọn lại cùng 1 file lần sau
     if (!file || !selectedMachine) return;
 
-    const CHUNK_SIZE = 64 * 1024; // Cắt thành từng mảnh 64KB
-    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-    const reader = new FileReader();
+    if (file.size > 50 * 1024 * 1024) {
+      alert('File vượt quá giới hạn 50MB cho phép (api_contract.md - FILE_TOO_LARGE).');
+      return;
+    }
 
-    let currentChunkIndex = 0;
+    const destinationPath = currentPath.endsWith('\\') ? `${currentPath}${file.name}` : `${currentPath}\\${file.name}`;
+    setTransferStatus(`Đang tải file lên Client: ${file.name}...`);
 
-    reader.onload = (event) => {
-      const base64Data = btoa(event.target.result);
-
-      // Gửi từng mảnh Chunk qua WebSocket[cite: 1, 4, 8]
-      onSendMessage({
-        target_machine_id: selectedMachine.machineId,
-        action: 'upload_file_chunk',
-        payload: {
-          destination_path: currentPath,
-          file_name: file.name,
-          chunk_index: currentChunkIndex,
-          total_chunks: totalChunks,
-          data_base64: base64Data
-        }
-      });
-
-      currentChunkIndex++;
-      const progress = Math.round((currentChunkIndex / totalChunks) * 100);
-      setTransferProgress(progress);
-      setTransferStatus(`Đang tải file lên Client: ${progress}%`);
-
-      if (currentChunkIndex < totalChunks) {
-        readNextChunk();
-      } else {
-        setTransferStatus('🎉 Tải file lên Client hoàn tất!');
-        setTimeout(() => {
-          setTransferProgress(0);
-          fetchDirectoryContent(currentPath); // Làm mới danh sách file
-        }, 2000);
+    try {
+      const res = await uploadFileApi(selectedMachine.machineId, destinationPath, file);
+      if (isWsError(res)) {
+        setTransferStatus('');
+        alert('Lỗi tải file lên: ' + getWsErrorMessage(res));
+        return;
       }
-    };
-
-    const readNextChunk = () => {
-      const start = currentChunkIndex * CHUNK_SIZE;
-      const end = Math.min(start + CHUNK_SIZE, file.size);
-      const slice = file.slice(start, end);
-      reader.readAsBinaryString(slice);
-    };
-
-    readNextChunk(); // Khởi chạy vòng lặp cắt mảnh
+      setTransferStatus('🎉 Tải file lên Client hoàn tất!');
+      setTimeout(() => {
+        setTransferStatus('');
+        fetchDirectoryContent(currentPath);
+      }, 1500);
+    } catch (err) {
+      setTransferStatus('');
+      alert('Lỗi tải file lên: ' + (err?.detail || 'Không rõ nguyên nhân'));
+    }
   };
 
   return (
     <div style={styles.container}>
-      {/* THANH ĐIỀU HƯỚNG ĐƯỜNG DẪN (PATH BAR) */}
       <div style={styles.topBar}>
         <button onClick={handleNavigateUp} style={styles.btnSecondary}>
           ⬆️ Thư Mục Cha
@@ -164,17 +140,16 @@ const FileTransfer = ({ selectedMachine, onSendMessage, lastMessage }) => {
         </label>
       </div>
 
-      {/* THANH TIẾN TRÌNH CHUYỂN FILE (PROGRESS BAR) */}
-      {transferProgress > 0 && (
+      <div style={styles.sandboxNotice}>
+        🔒 Chỉ được thao tác trong thư mục Sandbox đã cấu hình trên Client (mặc định <code>C:\RemoteControl\</code>). Kích thước file tối đa: 50MB.
+      </div>
+
+      {transferStatus && (
         <div style={styles.progressContainer}>
           <div style={styles.progressText}>{transferStatus}</div>
-          <div style={styles.progressBarTrack}>
-            <div style={{ ...styles.progressBarFill, width: `${transferProgress}%` }}></div>
-          </div>
         </div>
       )}
 
-      {/* BẢNG BÀN GIAO FILE & THƯ MỤC */}
       <div style={styles.tableWrapper}>
         <table style={styles.table}>
           <thead>
@@ -193,16 +168,16 @@ const FileTransfer = ({ selectedMachine, onSendMessage, lastMessage }) => {
             ) : (
               fileList.map((item, index) => (
                 <tr key={index} style={styles.tr}>
-                  <td 
-                    style={{ ...styles.td, cursor: item.is_directory ? 'pointer' : 'default', color: item.is_directory ? '#38bdf8' : '#f8fafc' }}
+                  <td
+                    style={{ ...styles.td, cursor: item.type === 'directory' ? 'pointer' : 'default', color: item.type === 'directory' ? '#38bdf8' : '#f8fafc' }}
                     onClick={() => handleItemClick(item)}
                   >
-                    {item.is_directory ? '📁 ' : '📄 '} <b>{item.name}</b>
+                    {item.type === 'directory' ? '📁 ' : '📄 '} <b>{item.name}</b>
                   </td>
-                  <td style={styles.td}>{item.is_directory ? 'Thư mục' : 'Tập tin'}</td>
-                  <td style={styles.td}>{item.is_directory ? '--' : `${(item.size_bytes / 1024).toFixed(1)} KB`}</td>
+                  <td style={styles.td}>{item.type === 'directory' ? 'Thư mục' : 'Tập tin'}</td>
+                  <td style={styles.td}>{item.type === 'directory' ? '--' : `${((item.sizeBytes || 0) / 1024).toFixed(1)} KB`}</td>
                   <td style={styles.td}>
-                    {!item.is_directory && (
+                    {item.type === 'file' && (
                       <button onClick={() => handleDownloadFile(item.name)} style={styles.btnDownload}>
                         📥 Tải Về Admin
                       </button>
@@ -224,14 +199,14 @@ const styles = {
   btnSecondary: { padding: '8px 12px', backgroundColor: '#334155', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' },
   pathInput: { flex: 1, padding: '8px 12px', backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '6px', color: '#fff', fontFamily: 'monospace' },
   btnUpload: { padding: '8px 16px', backgroundColor: '#0284c7', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem' },
+  sandboxNotice: { fontSize: '0.8rem', color: '#94a3b8' },
   progressContainer: { backgroundColor: '#1e293b', padding: '10px 14px', borderRadius: '6px', border: '1px solid #0284c7' },
-  progressText: { fontSize: '0.85rem', color: '#38bdf8', marginBottom: '6px' },
-  progressBarTrack: { height: '8px', backgroundColor: '#0f172a', borderRadius: '4px', overflow: 'hidden' },
-  progressBarFill: { height: '100%', backgroundColor: '#0284c7', transition: 'width 0.2s ease' },
+  progressText: { fontSize: '0.85rem', color: '#38bdf8' },
   tableWrapper: { flex: 1, overflowY: 'auto', border: '1px solid #334155', borderRadius: '8px', backgroundColor: '#1e293b' },
   table: { width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' },
   th: { padding: '12px', backgroundColor: '#0f172a', color: '#38bdf8', borderBottom: '1px solid #334155', position: 'sticky', top: 0 },
   td: { padding: '10px 12px', borderBottom: '1px solid #334155', color: '#f8fafc' },
+  tr: {},
   tdCenter: { padding: '24px', textAlign: 'center', color: '#94a3b8' },
   btnDownload: { padding: '4px 10px', backgroundColor: '#16a34a', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }
 };

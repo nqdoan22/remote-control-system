@@ -58,6 +58,16 @@ class GatewayClient:
         # Key: messageId (str) | Value: asyncio.Future (Đối tượng chứa kết quả tương lai)
         self.pending_requests: Dict[str, asyncio.Future] = {}
 
+        # BẢNG TRA CỨU THEO MACHINE (Pending by Machine):
+        # Theo api_contract.md, response THÀNH CÔNG từ Client App không mang
+        # originalMessageId (chỉ error response mới có). Gateway forward response
+        # nguyên vẹn (chỉ đổi source=machine_id), nên không có field nào nối lại
+        # với messageId của request gốc. Do đó theo dõi request đang chờ theo
+        # machine_id (giả định tối đa 1 lệnh in-flight / machine — khớp với
+        # CommandTracker phía Gateway).
+        # Key: machine_id (str) | Value: messageId của request đang chờ trên machine đó
+        self.pending_by_machine: Dict[str, str] = {}
+
         # BẢNG TRA CỨU REQUEST TỪ BROWSER (Browser Pending):
         # Map messageId của lệnh gửi từ Browser -> WebSocket của Browser đó.
         # Giúp định tuyến phản hồi/stream trả về đúng Tab Admin đã gửi lệnh.
@@ -122,17 +132,18 @@ class GatewayClient:
 
     async def _send_auth_message(self):
         """
-        Gửi gói tin xác thực WebApp (role=webapp + JWT token) tới Gateway.
-        Khớp với MessageHandler._handle_auth (Trường hợp 2) bên Gateway,
-        giúp Gateway đăng ký Backend vào danh sách WebApp Admin và chuyển tiếp
-        các sự kiện Broadcast (VD: agent.status) về cho Backend.
+        Gửi gói tin xác thực WebApp (type=auth.webapp + JWT token) tới Gateway.
+        Khớp với handlers/webapp_handler.py bên Gateway (chỉ chấp nhận đúng
+        type="auth.webapp" làm message đầu tiên), giúp Gateway đăng ký Backend
+        vào danh sách WebApp Admin và chuyển tiếp các sự kiện Broadcast
+        (VD: machine.status) về cho Backend.
         """
         token = create_access_token(subject="webapp-backend", role="webapp")
         auth_msg = WSMessage(
-            type="system.auth",
+            type="auth.webapp",
             source=settings.BACKEND_SOURCE_ID,
             destination="gateway",
-            payload={"role": "webapp", "token": token}
+            payload={"token": token}
         )
         await self.ws.send(auth_msg.model_dump_json())
         logger.info("✅ Đã gửi gói tin xác thực WebApp tới Gateway Server.")
@@ -182,23 +193,36 @@ class GatewayClient:
             msg_id = message.messageId
             payload = message.payload
 
-            # Xử lý sự kiện Agent Online/Offline từ Gateway -> Ghi nhận vào CSDL machines
+            # Xử lý sự kiện Machine Online/Offline từ Gateway -> Ghi nhận vào CSDL machines
             # Đây chính là nguồn dữ liệu cho API GET /machines hiển thị trên Dashboard.
-            if message.type == "agent.status" and isinstance(payload, dict):
+            # (Gateway phát event này với type="machine.status", xem connection_manager.py
+            # bên Gateway - KHÔNG PHẢI "agent.status")
+            if message.type == "machine.status" and isinstance(payload, dict):
                 machine_id = payload.get("machineId")
                 status = payload.get("status")
                 if machine_id and status:
                     self._upsert_machine(machine_id, status, payload)
 
-            # Kiểm tra xem payload có chứa ID của request gốc không (trong trường hợp error hoặc response)
+            # Kiểm tra xem payload có chứa ID của request gốc không (trường hợp error/timeout
+            # do Gateway tự sinh - LUÔN có originalMessageId theo api_contract.md)
             original_id = payload.get("originalMessageId") if isinstance(payload, dict) else None
-            
-            # Xác định ID cần giải quyết (Ưu tiên originalMessageId nếu có)
-            target_id = original_id if original_id and original_id in self.pending_requests else msg_id
+
+            # Xác định ID cần giải quyết:
+            #  1. originalMessageId nếu có (error/timeout do Gateway sinh ra)
+            #  2. Nếu là "response" thành công từ Client App (KHÔNG có originalMessageId theo
+            #     api_contract.md) -> khớp theo machine_id đang chờ (pending_by_machine)
+            #  3. Fallback: khớp trực tiếp theo messageId của chính message này
+            target_id: Optional[str] = None
+            if original_id and original_id in self.pending_requests:
+                target_id = original_id
+            elif message.type == "response" and message.source in self.pending_by_machine:
+                target_id = self.pending_by_machine.get(message.source)
+            elif msg_id in self.pending_requests:
+                target_id = msg_id
 
             # KHỚP NỐI REQUEST-RESPONSE:
             # Nếu ID này có trong Bảng tra cứu Pending Requests -> Đánh dấu Hoàn thành Future
-            if target_id in self.pending_requests:
+            if target_id and target_id in self.pending_requests:
                 future = self.pending_requests.pop(target_id)
                 if not future.done():
                     future.set_result(message)
@@ -210,7 +234,7 @@ class GatewayClient:
             # =========================================================================
             # 📡 ĐỊNH TUYẾN VỀ BROWSER (CẦU NỐI REAL-TIME /ws)
             # Trường hợp 1: Phản hồi/Lỗi cho lệnh Browser đã gửi -> trả về đúng Browser.
-            # Trường hợp 2: Sự kiện Broadcast (stream frame, keylogger, agent.status...)
+            # Trường hợp 2: Sự kiện Broadcast (stream frame, keylogger, machine.status...)
             #               -> gửi tới các Browser đang xem máy tương ứng.
             # =========================================================================
             if message.destination == "webapp" or (original_id and original_id in self.browser_pending):
@@ -245,8 +269,12 @@ class GatewayClient:
     def _upsert_machine(self, machine_id: str, status: str, payload: dict) -> None:
         """
         Ghi nhận (Upsert) máy Agent vào bảng machines khi Gateway báo sự kiện
-        Online/Offline (type='agent.status'). Đây là nguồn dữ liệu cho API 
+        Online/Offline (type='machine.status'). Đây là nguồn dữ liệu cho API
         GET /machines mà Frontend Dashboard hiển thị.
+
+        Payload của machine.status (theo connection_manager.py bên Gateway) dùng
+        camelCase: machineId, status, hostname, ipAddress, lastSeen. Gateway
+        không gửi os_info (do Client App thu thập, ngoài phạm vi Gateway).
         """
         db = SessionLocal()
         try:
@@ -257,7 +285,7 @@ class GatewayClient:
                 machine = Machine(
                     machine_id=machine_id,
                     hostname=payload.get("hostname"),
-                    ip_address=payload.get("ip_address"),
+                    ip_address=payload.get("ipAddress"),
                     os_info=payload.get("os_info"),
                     status=status,
                     last_seen=now
@@ -269,8 +297,8 @@ class GatewayClient:
                 machine.last_seen = now
                 if payload.get("hostname"):
                     machine.hostname = payload.get("hostname")
-                if payload.get("ip_address"):
-                    machine.ip_address = payload.get("ip_address")
+                if payload.get("ipAddress"):
+                    machine.ip_address = payload.get("ipAddress")
                 if payload.get("os_info"):
                     machine.os_info = payload.get("os_info")
                 logger.info(f"📌 Cập nhật trạng thái máy '{machine_id}' -> {status}.")
@@ -319,11 +347,18 @@ class GatewayClient:
         # Đăng ký ID tin nhắn vào bảng Pending Requests để hàm _handle_incoming_message lắng nghe
         self.pending_requests[message.messageId] = future
 
+        # Theo api_contract.md, machine đích nằm trong payload.destinationMachineId
+        # (KHÔNG PHẢI message.destination - luôn là "gateway"). Đăng ký thêm theo
+        # machine_id để khớp response thành công (không có originalMessageId).
+        target_machine_id = message.payload.get("destinationMachineId") if isinstance(message.payload, dict) else None
+        if target_machine_id:
+            self.pending_by_machine[target_machine_id] = message.messageId
+
         try:
             # Chuyển đổi WSMessage Schema thành chuỗi JSON và gửi qua WebSocket
             json_payload = message.model_dump_json()
             await self.ws.send(json_payload)
-            logger.info(f"🚀 Đã gửi lệnh type='{message.type}' [ID: {message.messageId}] tới destination='{message.destination}'")
+            logger.info(f"🚀 Đã gửi lệnh type='{message.type}' [ID: {message.messageId}] tới machine='{target_machine_id}'")
 
             # Treo chờ cho tới khi Future có kết quả HOẶC vượt quá thời gian Timeout
             response = await asyncio.wait_for(future, timeout=timeout_val)
@@ -331,11 +366,14 @@ class GatewayClient:
 
         except asyncio.TimeoutError:
             logger.error(f"⏰ Lệnh ID {message.messageId} bị quá thời gian chờ (Timeout {timeout_val}s)!")
-            raise TimeoutError(f"Không nhận được phản hồi từ máy đích {message.destination} trong vòng {timeout_val} giây.")
+            raise TimeoutError(f"Không nhận được phản hồi từ máy đích {target_machine_id} trong vòng {timeout_val} giây.")
 
         finally:
             # Luôn dọn dẹp ID khỏi bảng tra cứu để tránh rò rỉ bộ nhớ (Memory Leak)
             self.pending_requests.pop(message.messageId, None)
+            # Chỉ xóa nếu vẫn là request này (tránh xóa nhầm request mới hơn trên cùng machine)
+            if target_machine_id and self.pending_by_machine.get(target_machine_id) == message.messageId:
+                self.pending_by_machine.pop(target_machine_id, None)
 
     async def send_fire_and_forget(self, message: WSMessage):
         """
@@ -372,11 +410,15 @@ class GatewayClient:
         Returns:
             WSMessage: Gói tin phản hồi từ Agent.
         """
+        # Command Routing Convention (api_contract.md): machine đích PHẢI nằm trong
+        # payload.destinationMachineId. Envelope-level destination luôn là "gateway"
+        # vì Gateway mới là điểm kết nối WebSocket duy nhất của Backend.
+        full_payload = {**(payload or {}), "destinationMachineId": target_machine_id}
         message = WSMessage(
             type=command_type,
             source=settings.BACKEND_SOURCE_ID,
-            destination=target_machine_id,
-            payload=payload or {}
+            destination="gateway",
+            payload=full_payload
         )
         return await self.send_command_and_wait_response(message, timeout)
 
@@ -447,6 +489,7 @@ class GatewayClient:
             if not future.done():
                 future.cancel()
         self.pending_requests.clear()
+        self.pending_by_machine.clear()
 
         # Đóng kết nối WebSocket
         if self.ws:

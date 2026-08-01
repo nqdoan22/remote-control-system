@@ -1,76 +1,74 @@
 import React, { useState, useEffect } from 'react';
+import { controlApplicationsApi, isWsError, getWsErrorMessage, getWsData } from '../../services/api';
 
 /**
- * Applications Module - Quản lý các ứng dụng đang chạy có giao diện (GUI)
- * 
+ * Applications Module - Quản lý các ứng dụng đang chạy có giao diện (GUI).
+ * application.list / application.start / application.stop (api_contract.md).
+ *
  * @param {Object} selectedMachine - Máy Client đang chọn
- * @param {Function} onSendMessage - Hàm gửi WebSocket message đến Gateway
- * @param {Object} lastMessage - Dữ liệu mới nhất nhận từ WebSocket
  */
-const Applications = ({ selectedMachine, onSendMessage, lastMessage }) => {
+const Applications = ({ selectedMachine }) => {
   const [appList, setAppList] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [newAppName, setNewAppName] = useState('');
+  const [newAppPath, setNewAppPath] = useState('');
   const [filterText, setFilterText] = useState('');
 
-  // 1. Gửi yêu cầu lấy danh sách ứng dụng khi mở Module hoặc đổi máy
   useEffect(() => {
     fetchApplications();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMachine]);
 
-  // 2. Lắng nghe phản hồi từ Agent trả về qua WebSocket
-  useEffect(() => {
-    if (lastMessage && lastMessage.action === 'get_applications_response') {
-      setLoading(false);
-      if (lastMessage.status === 'success') {
-        setAppList(lastMessage.data || []);
-      } else {
-        alert('Lỗi lấy danh sách ứng dụng: ' + lastMessage.message);
-      }
-    }
-  }, [lastMessage]);
-
-  // Hàm gọi lấy danh sách ứng dụng
-  const fetchApplications = () => {
+  const fetchApplications = async () => {
     if (!selectedMachine) return;
     setLoading(true);
-    onSendMessage({
-      target_machine_id: selectedMachine.machineId,
-      action: 'get_applications'
-    });
-  };
-
-  // Hàm khởi chạy một ứng dụng mới (Start Application)
-  const handleStartApp = (e) => {
-    e.preventDefault();
-    if (!newAppName.trim()) return;
-
-    if (window.confirm(`Bạn có chắc muốn khởi chạy ứng dụng: "${newAppName}"?`)) {
-      onSendMessage({
-        target_machine_id: selectedMachine.machineId,
-        action: 'start_application',
-        payload: { app_name: newAppName }
-      });
-      setNewAppName('');
-      setTimeout(fetchApplications, 1500); // Làm mới danh sách sau 1.5s
+    try {
+      const res = await controlApplicationsApi(selectedMachine.machineId, 'list');
+      if (isWsError(res)) {
+        alert('Lỗi lấy danh sách ứng dụng: ' + getWsErrorMessage(res));
+      } else {
+        // payload.data.applications: [{ name, pid, cpuUsage, mainWindowTitle }] theo api_contract.md
+        setAppList(getWsData(res).applications || []);
+      }
+    } catch (err) {
+      alert('Lỗi lấy danh sách ứng dụng: ' + (err?.detail || 'Không rõ nguyên nhân'));
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Hàm tắt một ứng dụng đang chạy (Stop Application)
-  const handleStopApp = (pid, appTitle) => {
+  // Hàm khởi chạy một ứng dụng mới (application.start - cần đường dẫn .exe đầy đủ)
+  const handleStartApp = async (e) => {
+    e.preventDefault();
+    if (!newAppPath.trim() || !selectedMachine) return;
+
+    if (window.confirm(`Bạn có chắc muốn khởi chạy: "${newAppPath}"?`)) {
+      try {
+        const res = await controlApplicationsApi(selectedMachine.machineId, 'start', { path: newAppPath });
+        if (isWsError(res)) alert('Lỗi khởi chạy ứng dụng: ' + getWsErrorMessage(res));
+      } catch (err) {
+        alert('Lỗi khởi chạy ứng dụng: ' + (err?.detail || 'Không rõ nguyên nhân'));
+      }
+      setNewAppPath('');
+      setTimeout(fetchApplications, 1500);
+    }
+  };
+
+  // Hàm tắt một ứng dụng đang chạy (application.stop)
+  const handleStopApp = async (pid, appTitle) => {
     if (window.confirm(`Bạn có chắc muốn đóng ứng dụng: "${appTitle}" (PID: ${pid})?`)) {
-      onSendMessage({
-        target_machine_id: selectedMachine.machineId,
-        action: 'stop_application',
-        payload: { pid: pid }
-      });
+      try {
+        const res = await controlApplicationsApi(selectedMachine.machineId, 'stop', { pid });
+        if (isWsError(res)) alert('Lỗi đóng ứng dụng: ' + getWsErrorMessage(res));
+      } catch (err) {
+        alert('Lỗi đóng ứng dụng: ' + (err?.detail || 'Không rõ nguyên nhân'));
+      }
       setTimeout(fetchApplications, 1000);
     }
   };
 
   // Lọc danh sách ứng dụng theo tên
-  const filteredApps = appList.filter(app => 
-    app.title?.toLowerCase().includes(filterText.toLowerCase()) ||
+  const filteredApps = appList.filter(app =>
+    app.mainWindowTitle?.toLowerCase().includes(filterText.toLowerCase()) ||
     app.name?.toLowerCase().includes(filterText.toLowerCase())
   );
 
@@ -81,9 +79,9 @@ const Applications = ({ selectedMachine, onSendMessage, lastMessage }) => {
         <form onSubmit={handleStartApp} style={styles.startForm}>
           <input
             type="text"
-            placeholder="Nhập tên/đường dẫn ứng dụng (vd: calc, notepad)..."
-            value={newAppName}
-            onChange={(e) => setNewAppName(e.target.value)}
+            placeholder='Đường dẫn .exe đầy đủ (vd: C:\Windows\System32\notepad.exe)'
+            value={newAppPath}
+            onChange={(e) => setNewAppPath(e.target.value)}
             style={styles.input}
           />
           <button type="submit" style={styles.btnPrimary}>▶ Khởi chạy App</button>
@@ -127,11 +125,11 @@ const Applications = ({ selectedMachine, onSendMessage, lastMessage }) => {
                 <tr key={app.pid} style={styles.tr}>
                   <td style={styles.td}><code>{app.pid}</code></td>
                   <td style={styles.td}><b>{app.name}</b></td>
-                  <td style={styles.td}>{app.title || '*(Không có tiêu đề)'}</td>
-                  <td style={styles.td}>{app.cpu_percent ?? 0}%</td>
+                  <td style={styles.td}>{app.mainWindowTitle || '*(Không có tiêu đề)'}</td>
+                  <td style={styles.td}>{app.cpuUsage ?? 0}%</td>
                   <td style={styles.td}>
                     <button
-                      onClick={() => handleStopApp(app.pid, app.title || app.name)}
+                      onClick={() => handleStopApp(app.pid, app.mainWindowTitle || app.name)}
                       style={styles.btnDanger}
                     >
                       🛑 Đóng App

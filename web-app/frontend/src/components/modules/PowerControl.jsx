@@ -1,53 +1,44 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { controlPowerApi, isWsError, getWsErrorMessage } from '../../services/api';
 
 /**
- * PowerControl Module - Điều khiển nguồn máy tính Client (Khóa, Sleep, Restart, Shutdown)
+ * PowerControl Module - Điều khiển nguồn máy tính Client (Lock, Sleep, Restart, Shutdown).
+ * power.lock / power.restart / power.shutdown / power.sleep qua REST.
+ * Toàn bộ nằm trong Sensitive Feature List -> Gateway tự xin Permission Confirmation.
  */
-const PowerControl = ({ selectedMachine, onSendMessage, lastMessage }) => {
+const PowerControl = ({ selectedMachine }) => {
   const [loading, setLoading] = useState(false);
-  const [selectedAction, setSelectedAction] = useState(null); // Hành động đang chờ xác nhận
+  const [selectedAction, setSelectedAction] = useState(null); // { type, label }
   const [statusLog, setStatusLog] = useState('');
 
-  // Lắng nghe phản hồi từ Agent
-  useEffect(() => {
-    if (!lastMessage) return;
-
-    if (lastMessage.action === 'power_control_response') {
-      setLoading(false);
-      if (lastMessage.status === 'success') {
-        setStatusLog(`✅ Đã gửi lệnh thành công: ${lastMessage.message}`);
-      } else if (lastMessage.status === 'rejected') {
-        setStatusLog('❌ Lệnh bị hủy bỏ: Người dùng Client từ chối cho phép[cite: 1, 2, 5].');
-      } else {
-        setStatusLog(`⚠️ Lỗi thực thi: ${lastMessage.message}`);
-      }
-    }
-  }, [lastMessage]);
-
-  // Yêu cầu xác nhận trước khi thực hiện hành động nguy hiểm (Safety Guardrail)
   const initiatePowerAction = (actionType, label) => {
-    setSelectedAction({ type: actionType, label: label });
+    setSelectedAction({ type: actionType, label });
   };
 
-  // Xác nhận và gửi lệnh WebSocket
-  const confirmAndExecute = () => {
+  const confirmAndExecute = async () => {
     if (!selectedAction || !selectedMachine) return;
+    const { type, label } = selectedAction;
 
     setLoading(true);
-    setStatusLog(`⏳ Đang gửi lệnh "${selectedAction.label}" đến Client...`);
+    setStatusLog(`⏳ Đang gửi lệnh "${label}" đến Client (có thể chờ người dùng Client xác nhận)...`);
+    setSelectedAction(null);
 
-    onSendMessage({
-      target_machine_id: selectedMachine.machineId,
-      action: 'power_control',
-      payload: { power_command: selectedAction.type }
-    });
-
-    setSelectedAction(null); // Đóng Hộp thoại xác nhận
+    try {
+      const res = await controlPowerApi(selectedMachine.machineId, type);
+      if (isWsError(res)) {
+        setStatusLog(`⚠️ ${getWsErrorMessage(res)}`);
+      } else {
+        setStatusLog(`✅ Đã gửi lệnh thành công: ${label}`);
+      }
+    } catch (err) {
+      setStatusLog(`⚠️ Lỗi thực thi: ${err?.detail || 'Không rõ nguyên nhân'}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <div style={styles.container}>
-      {/* BANNER CẢNH BÁO MỨC ĐỘ NGUY HIỂM */}
       <div style={styles.warningBanner}>
         ⚠️ <b>CẢNH BÁO AN TOÀN NGUỒN ĐIỆN:</b>
         <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem' }}>
@@ -55,14 +46,12 @@ const PowerControl = ({ selectedMachine, onSendMessage, lastMessage }) => {
         </p>
       </div>
 
-      {/* DANH SÁCH 4 NÚT ĐIỀU KHIỂN NGUỒN */}
       <div style={styles.gridContainer}>
-        {/* Nút 1: Khóa màn hình */}
         <div style={styles.powerCard}>
           <div style={{ fontSize: '2.5rem' }}>🔒</div>
           <h3>Khóa Màn Hình</h3>
-          <p style={styles.cardDesc}>Khóa phiên làm việc hiện tại (`LockWorkStation`). Yêu cầu nhập mật khẩu để mở lại.</p>
-          <button 
+          <p style={styles.cardDesc}>Khóa phiên làm việc hiện tại. Yêu cầu nhập mật khẩu để mở lại.</p>
+          <button
             onClick={() => initiatePowerAction('lock', 'Khóa màn hình')}
             disabled={loading}
             style={{ ...styles.actionBtn, backgroundColor: '#0284c7' }}
@@ -71,12 +60,11 @@ const PowerControl = ({ selectedMachine, onSendMessage, lastMessage }) => {
           </button>
         </div>
 
-        {/* Nút 2: Chế độ Ngủ (Sleep) */}
         <div style={styles.powerCard}>
           <div style={{ fontSize: '2.5rem' }}>🌙</div>
           <h3>Chế Độ Ngủ (Sleep)</h3>
           <p style={styles.cardDesc}>Đưa máy tính vào trạng thái tiết kiệm điện năng thấp mà không đóng ứng dụng.</p>
-          <button 
+          <button
             onClick={() => initiatePowerAction('sleep', 'Đưa vào chế độ Sleep')}
             disabled={loading}
             style={{ ...styles.actionBtn, backgroundColor: '#d97706' }}
@@ -85,12 +73,11 @@ const PowerControl = ({ selectedMachine, onSendMessage, lastMessage }) => {
           </button>
         </div>
 
-        {/* Nút 3: Khởi động lại */}
         <div style={styles.powerCard}>
           <div style={{ fontSize: '2.5rem' }}>🔄</div>
           <h3>Khởi Động Lại</h3>
           <p style={styles.cardDesc}>Đóng tất cả ứng dụng và khởi động lại hệ điều hành Windows.</p>
-          <button 
+          <button
             onClick={() => initiatePowerAction('restart', 'Khởi động lại máy')}
             disabled={loading}
             style={{ ...styles.actionBtn, backgroundColor: '#ea580c' }}
@@ -99,12 +86,11 @@ const PowerControl = ({ selectedMachine, onSendMessage, lastMessage }) => {
           </button>
         </div>
 
-        {/* Nút 4: Tắt máy */}
         <div style={styles.powerCard}>
           <div style={{ fontSize: '2.5rem' }}>🔌</div>
           <h3>Tắt Máy Tính</h3>
-          <p style={styles.cardDesc}>Tắt hoàn toàn nguồn điện của máy Client (`Shutdown`).</p>
-          <button 
+          <p style={styles.cardDesc}>Tắt hoàn toàn nguồn điện của máy Client.</p>
+          <button
             onClick={() => initiatePowerAction('shutdown', 'Tắt máy tính')}
             disabled={loading}
             style={{ ...styles.actionBtn, backgroundColor: '#dc2626' }}
@@ -114,14 +100,12 @@ const PowerControl = ({ selectedMachine, onSendMessage, lastMessage }) => {
         </div>
       </div>
 
-      {/* THÔNG BÁO TRẠNG THÁI PHẢN HỒI */}
       {statusLog && (
         <div style={styles.statusBox}>
           <b>Nhật ký phản hồi:</b> {statusLog}
         </div>
       )}
 
-      {/* MODAL POPUP XÁC NHẬN HÀNH ĐỘNG NGUY HIỂM */}
       {selectedAction && (
         <div style={styles.modalOverlay}>
           <div style={styles.modalContent}>

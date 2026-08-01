@@ -46,7 +46,7 @@ const MachinePage = () => {
   // =========================================================================
   // 🔌 KHỞI TẠO WEBSOCKET CONNECTION TỚI MÁY CLIENT
   // =========================================================================
-  const { isConnected, connecting, reconnecting, lastMessage, sendMessage } = useWebSocket(machineId);
+  const { isConnected, connecting, reconnecting, lastMessage } = useWebSocket(machineId);
 
   // =========================================================================
   // 🚀 REST API: Lấy thông tin cơ bản của máy khi mới mở trang
@@ -79,32 +79,10 @@ const MachinePage = () => {
   }, [lastMessage]);
 
   // =========================================================================
-  // 🔄 ADAPTER GỬI LỆNH: Các Module Component gọi onSendMessage({action, payload})
-  // Nhưng Hook useWebSocket chỉ nhận sendMessage(type, payload).
-  // -> Chuyển đổi cú pháp message của Module về dạng Envelope WSMessage chuẩn.
-  // =========================================================================
-  const handleModuleMessage = (msg) => {
-    sendMessage(msg.action, msg.payload || {});
-  };
-
-  // =========================================================================
-  // 🔁 NORMALIZE lastMessage: Gateway/Client gửi dữ liệu qua trường `type`,
-  // nhưng các Module Component đọc trường `action`, `status`, `message` & `data`.
-  // -> Bổ sung các trường này (lấy từ payload của Envelope) để 2 chuẩn hoạt động chung.
-  // =========================================================================
-  const moduleLastMessage = lastMessage
-    ? {
-        ...lastMessage,
-        action: lastMessage.action || lastMessage.type,
-        // data: ưu tiên trường data trong payload (VD: danh sách app/process),
-        // nếu không có thì fallback về toàn bộ payload.
-        data: lastMessage.data ?? lastMessage.payload?.data ?? lastMessage.payload,
-        // status / message thường được đóng gói TRONG payload (không nằm ngoài envelope)
-        status: lastMessage.status ?? lastMessage.payload?.status,
-        message: lastMessage.message ?? lastMessage.payload?.message,
-      }
-    : lastMessage;
-
+  // Các Module Component giờ điều khiển qua REST API (services/api.js) - đúng
+  // theo docs/api_contract.md - và chỉ dùng `lastMessage` (shape {type, payload}
+  // nguyên vẹn từ Gateway/Client App) để nhận dữ liệu streaming: screen.live.frame,
+  // webcam.frame, keylogger.data. Không còn cần adapter action/status/data nữa.
   // =========================================================================
   // 🖥️ CHUẨN HÓA selectedMachine: Các Module Component yêu cầu object có
   // { machineId, hostname, ipAddress, status } từ REST MachineResponse.
@@ -203,8 +181,7 @@ const MachinePage = () => {
         {ActiveModuleComponent && selectedMachine ? (
           <ActiveModuleComponent
             selectedMachine={selectedMachine}
-            onSendMessage={handleModuleMessage}
-            lastMessage={moduleLastMessage}
+            lastMessage={lastMessage}
           />
         ) : (
           <div style={styles.card}>

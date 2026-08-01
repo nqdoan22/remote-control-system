@@ -118,7 +118,98 @@ export const getAuditLogsApi = async (params = {}) => {
 
 
 /* ============================================================================
-   SECTION 4: WEBSOCKET PROTOCOL HELPER (Khớp với schemas/protocol.py)
+   SECTION 4: MODULE CONTROL APIs (Khớp với routers/modules.py + api_contract.md)
+   Backend trả về nguyên vẹn WSMessage envelope { type, payload: {success, data} }
+   nhận từ Gateway/Client App. Dùng isWsError()/getWsData() bên dưới để đọc.
+   ============================================================================ */
+
+export const controlApplicationsApi = (machineId, action, extra = {}) =>
+  api.post('/modules/applications', { machine_id: machineId, action, ...extra });
+
+export const controlProcessesApi = (machineId, action, extra = {}) =>
+  api.post('/modules/processes', { machine_id: machineId, action, ...extra });
+
+export const takeScreenshotApi = (machineId) =>
+  api.post('/modules/screenshot', { machine_id: machineId });
+
+// Lệnh thuộc Sensitive Feature List (screen.live.start, webcam.start, keylogger.start,
+// power.*) có thể mất tới ~35s phía Backend (chờ Permission Confirmation ở Gateway,
+// tối đa 30s theo api_contract.md) -> phải nới timeout HTTP client, nếu không axios
+// sẽ tự hủy request trước khi Backend kịp trả lời.
+const SENSITIVE_COMMAND_TIMEOUT_MS = 40000;
+
+export const controlLiveScreenApi = (machineId, action, fps = 10) =>
+  api.post(
+    '/modules/live-screen',
+    { machine_id: machineId, action, fps },
+    { timeout: SENSITIVE_COMMAND_TIMEOUT_MS }
+  );
+
+export const controlKeyloggerApi = (machineId, action) =>
+  api.post(
+    '/modules/keylogger',
+    { machine_id: machineId, action },
+    { timeout: SENSITIVE_COMMAND_TIMEOUT_MS }
+  );
+
+// File tối đa 50MB (api_contract.md) không chunk -> cần timeout dài hơn mặc định 10s.
+const FILE_TRANSFER_TIMEOUT_MS = 60000;
+
+export const fileActionApi = (machineId, action, path) =>
+  api.post(
+    '/modules/file/action',
+    { machine_id: machineId, action, path },
+    { timeout: FILE_TRANSFER_TIMEOUT_MS }
+  );
+
+export const uploadFileApi = (machineId, destinationPath, file) => {
+  const form = new FormData();
+  form.append('machine_id', machineId);
+  form.append('destination_path', destinationPath);
+  form.append('file', file);
+  return api.post('/modules/file/upload', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: FILE_TRANSFER_TIMEOUT_MS,
+  });
+};
+
+export const controlWebcamApi = (machineId, action, fps = 10) =>
+  api.post(
+    '/modules/webcam',
+    { machine_id: machineId, action, fps },
+    { timeout: SENSITIVE_COMMAND_TIMEOUT_MS }
+  );
+
+export const controlPowerApi = (machineId, action, delaySeconds = 0) =>
+  api.post(
+    '/modules/power',
+    { machine_id: machineId, action, delay_seconds: delaySeconds },
+    { timeout: SENSITIVE_COMMAND_TIMEOUT_MS }
+  );
+
+/**
+ * Response thành công từ REST module APIs LUÔN có dạng WSMessage envelope
+ * { type: 'response' | 'error', payload: {...} } - kể cả khi Gateway trả về
+ * lỗi nghiệp vụ (VD: PERMISSION_DENIED, PERMISSION_TIMEOUT) vì đó vẫn là
+ * HTTP 200 OK (chỉ lỗi hạ tầng như MACHINE Offline mới raise HTTPException).
+ */
+export const isWsError = (res) => !res || res.type === 'error';
+
+export const getWsErrorMessage = (res) => {
+  if (!res) return 'Không nhận được phản hồi.';
+  if (res.type === 'error') {
+    const code = res.payload?.code;
+    if (code === 'PERMISSION_DENIED') return 'Người dùng trên máy Client đã TỪ CHỐI cấp quyền.';
+    if (code === 'PERMISSION_TIMEOUT') return 'Hết thời gian chờ xác nhận từ người dùng Client (Timeout).';
+    return res.payload?.message || `Lỗi: ${code || 'UNKNOWN'}`;
+  }
+  return '';
+};
+
+export const getWsData = (res) => res?.payload?.data ?? {};
+
+/* ============================================================================
+   SECTION 5: WEBSOCKET PROTOCOL HELPER (Khớp với schemas/protocol.py)
    ============================================================================ */
 
 /**

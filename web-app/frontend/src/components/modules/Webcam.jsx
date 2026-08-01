@@ -1,91 +1,78 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { controlWebcamApi, isWsError, getWsErrorMessage } from '../../services/api';
 
 /**
- * Webcam Module - Stream camera trực tiếp từ máy Client kèm Cảnh báo Đèn đỏ (Red Indicator)
+ * Webcam Module - Stream camera trực tiếp từ máy Client kèm Cảnh báo Đèn đỏ.
+ * webcam.start / webcam.stop qua REST (Sensitive Feature List - Gateway tự xin
+ * Permission Confirmation). Frame (webcam.frame) nhận qua WebSocket broadcast.
  */
-const Webcam = ({ selectedMachine, onSendMessage, lastMessage }) => {
+const Webcam = ({ selectedMachine, lastMessage }) => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [loading, setLoading] = useState(false);
   const [currentFrame, setCurrentFrame] = useState(null);
+  const isStreamingRef = useRef(false);
 
-  // Reset khi đổi máy
-  useEffect(() => {
-    if (isStreaming) {
-      stopWebcam();
-    }
-    setCurrentFrame(null);
+  const stopWebcam = async (silent = false) => {
     setIsStreaming(false);
+    isStreamingRef.current = false;
     setLoading(false);
-  }, [selectedMachine]);
+    if (!selectedMachine) return;
+    try {
+      await controlWebcamApi(selectedMachine.machineId, 'stop');
+    } catch (err) {
+      if (!silent) alert('Lỗi tắt Webcam: ' + (err?.detail || 'Không rõ nguyên nhân'));
+    }
+  };
 
-  // CLEANUP: Tự động tắt Webcam khi Admin thoát khỏi Tab để đảm bảo quyền riêng tư
+  // Tự động tắt Webcam khi đổi máy / rời trang để đảm bảo quyền riêng tư
   useEffect(() => {
     return () => {
-      if (isStreaming) {
-        onSendMessage({
-          target_machine_id: selectedMachine?.machineId,
-          action: 'stop_webcam'
-        });
-      }
+      if (isStreamingRef.current) stopWebcam(true);
     };
-  }, [isStreaming, selectedMachine]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMachine]);
 
-  // LẮNG NGHE LỖI VÀ KHUNG HÌNH TỪ WEBSOCKET
+  // Lắng nghe frame webcam.frame phát về từ Gateway (broadcast theo machine_id)
   useEffect(() => {
-    if (!lastMessage) return;
-
-    if (lastMessage.action === 'start_webcam_response') {
-      setLoading(false);
-      if (lastMessage.status === 'success') {
-        setIsStreaming(true);
-      } else if (lastMessage.status === 'rejected') {
-        alert('❌ Người dùng Client TỪ CHỐI mở Webcam![cite: 1, 2, 5]');
-      } else if (lastMessage.status === 'timeout') {
-        alert('⏱️ Yêu cầu mở Webcam đã HẾT HẠN (Timeout 15s)![cite: 1, 2, 5, 7]');
-      } else {
-        alert('Lỗi Webcam: ' + lastMessage.message);
-      }
-    }
-
-    if (lastMessage.action === 'webcam_frame' && isStreaming) {
-      setCurrentFrame(`data:image/jpeg;base64,${lastMessage.data.image_base64}`);
+    if (!lastMessage || !isStreaming) return;
+    if (lastMessage.type === 'webcam.frame') {
+      const { image } = lastMessage.payload || {};
+      if (image) setCurrentFrame(`data:image/jpeg;base64,${image}`);
     }
   }, [lastMessage, isStreaming]);
 
-  const startWebcam = () => {
+  const startWebcam = async () => {
     if (!selectedMachine) return;
     setLoading(true);
-    onSendMessage({
-      target_machine_id: selectedMachine.machineId,
-      action: 'start_webcam'
-    });
-  };
-
-  const stopWebcam = () => {
-    setIsStreaming(false);
-    setLoading(false);
-    onSendMessage({
-      target_machine_id: selectedMachine?.machineId,
-      action: 'stop_webcam'
-    });
+    try {
+      const res = await controlWebcamApi(selectedMachine.machineId, 'start');
+      setLoading(false);
+      if (isWsError(res)) {
+        alert(getWsErrorMessage(res));
+      } else {
+        setIsStreaming(true);
+        isStreamingRef.current = true;
+      }
+    } catch (err) {
+      setLoading(false);
+      alert('Lỗi bật Webcam: ' + (err?.detail || 'Không rõ nguyên nhân'));
+    }
   };
 
   return (
     <div style={styles.container}>
-      {/* CẢNH BÁO MINH BẠCH BẢO MẬT (RED INDICATOR NOTICE) */}
       <div style={styles.privacyBanner}>
-        📷 <b>QUYỀN RIÊNG TƯ & AN TOÀN TRỰC QUAN:</b> 
-        <span> Khi Webcam bật, một cửa sổ <b>Đèn Chớp Đỏ (Red Indicator)</b> bắt buộc sẽ hiển thị công khai trên màn hình Client để cảnh báo người dùng[cite: 1, 2, 3, 6].</span>
+        📷 <b>QUYỀN RIÊNG TƯ & AN TOÀN TRỰC QUAN:</b>
+        <span> Khi Webcam bật, một cửa sổ <b>Đèn Chớp Đỏ (Red Indicator)</b> bắt buộc sẽ hiển thị công khai trên màn hình Client để cảnh báo người dùng.</span>
       </div>
 
-      {/* THANH THAO TÁC */}
       <div style={styles.topBar}>
         {!isStreaming ? (
           <button onClick={startWebcam} disabled={loading} style={styles.btnStart}>
             {loading ? '⏳ Đang chờ xin phép người dùng Client...' : '📷 Bật Webcam Client'}
           </button>
         ) : (
-          <button onClick={stopWebcam} style={styles.btnStop}>
+          <button onClick={() => stopWebcam()} style={styles.btnStop}>
             🛑 Tắt Webcam
           </button>
         )}
@@ -97,7 +84,6 @@ const Webcam = ({ selectedMachine, onSendMessage, lastMessage }) => {
         )}
       </div>
 
-      {/* MÀN HÌNH HIỂN THỊ CAMERA */}
       <div style={styles.cameraViewer}>
         {loading && (
           <div style={styles.statusBox}>

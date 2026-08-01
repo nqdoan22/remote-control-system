@@ -1,43 +1,41 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { controlKeyloggerApi, isWsError, getWsErrorMessage } from '../../services/api';
 
 /**
- * Keylogger Module - Theo dõi phím bấm từ máy Client theo thời gian thực
- * 
- * @param {Object} selectedMachine - Máy Client đang chọn
- * @param {Function} onSendMessage - Hàm gửi WebSocket message
- * @param {Object} lastMessage - Dữ liệu nhận từ WebSocket
+ * Keylogger Module - Theo dõi phím bấm từ máy Client theo thời gian thực.
+ * keylogger.start / keylogger.stop qua REST (Sensitive Feature List). Dữ liệu
+ * phím (keylogger.data) nhận qua WebSocket broadcast, payload = { entries: [{key,
+ * timestamp}], windowTitle } theo api_contract.md.
  */
-const Keylogger = ({ selectedMachine, onSendMessage, lastMessage }) => {
-  // ===== STATE QUẢN LÝ GIAO DIỆN =====
+const Keylogger = ({ selectedMachine, lastMessage }) => {
   const [isLogging, setIsLogging] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [keystrokes, setKeystrokes] = useState([]); // Danh sách các phím đã nhận
+  const [keystrokes, setKeystrokes] = useState([]); // [{ key, timestamp, windowTitle }]
   const [filterText, setFilterText] = useState('');
-  
-  // Ref tự động cuộn khung văn bản xuống dưới cùng khi có phím mới
+
   const logContainerRef = useRef(null);
+  const isLoggingRef = useRef(false);
 
-  // Reset khi chuyển máy
-  useEffect(() => {
-    if (isLogging) {
-      stopKeylogger();
-    }
-    setKeystrokes([]);
+  const stopKeylogger = async (silent = false) => {
     setIsLogging(false);
+    isLoggingRef.current = false;
     setLoading(false);
-  }, [selectedMachine]);
+    if (!selectedMachine) return;
+    try {
+      await controlKeyloggerApi(selectedMachine.machineId, 'stop');
+    } catch (err) {
+      if (!silent) alert('Lỗi dừng Keylogger: ' + (err?.detail || 'Không rõ nguyên nhân'));
+    }
+  };
 
-  // Cleanup: Ngắt Keylogger khi Admin thoát tab
+  // Reset khi đổi máy / rời trang -> tự động dừng keylogger
   useEffect(() => {
+    setKeystrokes([]);
     return () => {
-      if (isLogging) {
-        onSendMessage({
-          target_machine_id: selectedMachine?.machineId,
-          action: 'stop_keylogger'
-        });
-      }
+      if (isLoggingRef.current) stopKeylogger(true);
     };
-  }, [isLogging, selectedMachine]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMachine]);
 
   // Tự động cuộn xuống cuối khung Log
   useEffect(() => {
@@ -46,52 +44,37 @@ const Keylogger = ({ selectedMachine, onSendMessage, lastMessage }) => {
     }
   }, [keystrokes]);
 
-  // ===== LẮNG NGHE LỖI VÀ DỮ LIỆU PHÍM BẤM PHÁT BẤM VỀ =====
+  // Nhận dữ liệu phím bấm đẩy về từ Client (keylogger.data - event định kỳ)
   useEffect(() => {
-    if (!lastMessage) return;
-
-    // Phản hồi lệnh Bắt đầu / Dừng
-    if (lastMessage.action === 'start_keylogger_response') {
-      setLoading(false);
-      if (lastMessage.status === 'success') {
-        setIsLogging(true);
-      } else if (lastMessage.status === 'rejected') {
-        alert('❌ Người dùng trên máy Client đã TỪ CHỐI cho phép bật Keylogger![cite: 1, 2, 5]');
-      } else if (lastMessage.status === 'timeout') {
-        alert('⏱️ Yêu cầu xin quyền đã HẾT HẠN (Timeout 15s)![cite: 1, 2, 5, 7]');
-      } else {
-        alert('Lỗi khởi động Keylogger: ' + lastMessage.message);
-      }
-    }
-
-    // Nhận dữ liệu phím bấm đẩy về từ Client[cite: 1, 5, 6, 8]
-    if (lastMessage.action === 'keylogger_data' && isLogging) {
-      const newKeys = lastMessage.data.keys || [];
-      setKeystrokes(prev => [...prev, ...newKeys]);
+    if (!lastMessage || !isLogging) return;
+    if (lastMessage.type === 'keylogger.data') {
+      const { entries = [], windowTitle } = lastMessage.payload || {};
+      const tagged = entries.map((e) => ({ ...e, windowTitle }));
+      setKeystrokes((prev) => [...prev, ...tagged]);
     }
   }, [lastMessage, isLogging]);
 
-  const startKeylogger = () => {
+  const startKeylogger = async () => {
     if (!selectedMachine) return;
     setLoading(true);
-    onSendMessage({
-      target_machine_id: selectedMachine.machineId,
-      action: 'start_keylogger'
-    });
-  };
-
-  const stopKeylogger = () => {
-    setIsLogging(false);
-    setLoading(false);
-    onSendMessage({
-      target_machine_id: selectedMachine?.machineId,
-      action: 'stop_keylogger'
-    });
+    try {
+      const res = await controlKeyloggerApi(selectedMachine.machineId, 'start');
+      setLoading(false);
+      if (isWsError(res)) {
+        alert(getWsErrorMessage(res));
+      } else {
+        setIsLogging(true);
+        isLoggingRef.current = true;
+      }
+    } catch (err) {
+      setLoading(false);
+      alert('Lỗi khởi động Keylogger: ' + (err?.detail || 'Không rõ nguyên nhân'));
+    }
   };
 
   // Tải file Log phím bấm về máy Admin (.txt)
   const handleDownloadLog = () => {
-    const rawContent = keystrokes.map(k => `[${k.timestamp}] (${k.window_title || 'N/A'}): ${k.key}`).join('\n');
+    const rawContent = keystrokes.map(k => `[${k.timestamp}] (${k.windowTitle || 'N/A'}): ${k.key}`).join('\n');
     const blob = new Blob([rawContent], { type: 'text/plain;charset=utf-8' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
@@ -99,18 +82,17 @@ const Keylogger = ({ selectedMachine, onSendMessage, lastMessage }) => {
     link.click();
   };
 
-  // Định dạng lại các phím đặc biệt (VD: [ENTER], [BACKSPACE]) để làm nổi bật trên UI
   const renderKeyItem = (keyObj, index) => {
     const isSpecial = keyObj.key.startsWith('[') && keyObj.key.endsWith(']');
     return (
-      <span 
-        key={index} 
+      <span
+        key={index}
         style={{
           ...styles.keyTag,
           backgroundColor: isSpecial ? '#9333ea' : '#334155',
           color: isSpecial ? '#f3e8ff' : '#f8fafc'
         }}
-        title={`Cửa sổ: ${keyObj.window_title || 'Khấu hiểu'} | Thời gian: ${keyObj.timestamp}`}
+        title={`Cửa sổ: ${keyObj.windowTitle || 'Không rõ'} | Thời gian: ${keyObj.timestamp}`}
       >
         {keyObj.key}
       </span>
@@ -119,12 +101,10 @@ const Keylogger = ({ selectedMachine, onSendMessage, lastMessage }) => {
 
   return (
     <div style={styles.container}>
-      {/* BANNER NGUYÊN TẮC BẢO MẬT & XIN QUYỀN */}
       <div style={styles.privacyNotice}>
-        🛡️ <b>CẢNH BÁO BẢO MẬT VÀ QUYỀN RIÊNG TƯ:</b> Tính năng Keylogger yêu cầu sự đồng ý trực tiếp (Explicit Consent) từ người dùng Client[cite: 1, 2, 5, 7].
+        🛡️ <b>CẢNH BÁO BẢO MẬT VÀ QUYỀN RIÊNG TƯ:</b> Tính năng Keylogger yêu cầu sự đồng ý trực tiếp (Explicit Consent) từ người dùng Client.
       </div>
 
-      {/* THANH ĐIỀU HƯỚNG BẤM TẮT/MỞ VÀ TẢI LOG */}
       <div style={styles.topBar}>
         <div style={styles.actionGroup}>
           {!isLogging ? (
@@ -132,7 +112,7 @@ const Keylogger = ({ selectedMachine, onSendMessage, lastMessage }) => {
               {loading ? '⏳ Đang xin phép người dùng Client...' : '⌨️ Bắt Đầu Theo Dõi Phím'}
             </button>
           ) : (
-            <button onClick={stopKeylogger} style={styles.btnStop}>
+            <button onClick={() => stopKeylogger()} style={styles.btnStop}>
               ⏹ Dừng Ghi Phím
             </button>
           )}
@@ -155,7 +135,6 @@ const Keylogger = ({ selectedMachine, onSendMessage, lastMessage }) => {
         )}
       </div>
 
-      {/* KHU VỰC TÌM KIẾM TỪ KHÓA TRONG NỘI DUNG PHÍM */}
       <div style={styles.searchBar}>
         <input
           type="text"
@@ -166,7 +145,6 @@ const Keylogger = ({ selectedMachine, onSendMessage, lastMessage }) => {
         />
       </div>
 
-      {/* KHUNG BẢNG HIỂN THỊ NHẬT KÝ PHÍM (KEYLOG TERMINAL) */}
       <div style={styles.logTerminal} ref={logContainerRef}>
         {keystrokes.length === 0 ? (
           <div style={styles.emptyState}>
@@ -175,7 +153,7 @@ const Keylogger = ({ selectedMachine, onSendMessage, lastMessage }) => {
         ) : (
           <div style={styles.keysWrapper}>
             {keystrokes
-              .filter(k => k.key.toLowerCase().includes(filterText.toLowerCase()) || (k.window_title && k.window_title.toLowerCase().includes(filterText.toLowerCase())))
+              .filter(k => k.key.toLowerCase().includes(filterText.toLowerCase()) || (k.windowTitle && k.windowTitle.toLowerCase().includes(filterText.toLowerCase())))
               .map((k, idx) => renderKeyItem(k, idx))}
           </div>
         )}

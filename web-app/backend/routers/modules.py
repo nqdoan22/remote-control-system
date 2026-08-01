@@ -6,7 +6,8 @@ ARCHITECTURE ROLE:
   - Đóng vai trò là "Bộ điều khiển trung tâm" (Command Dispatcher).
   - Tiếp nhận yêu cầu điều khiển từ Web Frontend (Admin).
   - Ghi nhật ký thao tác (AuditLog) vào CSDL để phục vụ kiểm toán an toàn thông tin.
-  - Đóng gói lệnh thành tin nhắn chuẩn và gửi tới Agent thông qua WebSocket Gateway.
+  - Đóng gói lệnh thành message type CHÍNH XÁC theo docs/api_contract.md rồi gửi
+    tới Agent thông qua WebSocket Gateway (core/gateway_client.py).
 ===============================================================================
 """
 
@@ -21,6 +22,7 @@ from db.database import get_db
 from db.models import User, AuditLog, Machine
 from core.security import get_current_user
 from core.gateway_client import gateway_client
+from core.config import settings
 
 logger = logging.getLogger("ModulesRouter")
 router = APIRouter(prefix="/modules", tags=["Module Controls"])
@@ -28,41 +30,84 @@ router = APIRouter(prefix="/modules", tags=["Module Controls"])
 
 # =========================================================================
 # 📌 KHAI BÁO CÁC PYDANTIC SCHEMAS CHO DỮ LIỆU ĐẦU VÀO (REQUEST BODIES)
+# Field "action" chỉ là chi tiết REST nội bộ - mỗi action được map 1-1 sang
+# đúng message type của Gateway (xem các bảng _*_ACTION_TYPE bên dưới),
+# KHÔNG gửi "action" thẳng ra Gateway.
 # =========================================================================
 
 class AppControlRequest(BaseModel):
     machine_id: str = Field(..., description="Mã định danh của máy Agent")
     action: str = Field(..., description="Hành động: 'list', 'start', 'stop'")
-    app_name: Optional[str] = Field(None, description="Tên ứng dụng cần chạy hoặc dừng")
+    path: Optional[str] = Field(None, description="Đường dẫn file .exe cần chạy (dùng cho 'start')")
+    pid: Optional[int] = Field(None, description="PID ứng dụng cần dừng (dùng cho 'stop')")
+
 
 class ProcessControlRequest(BaseModel):
     machine_id: str = Field(...)
     action: str = Field(..., description="Hành động: 'list', 'kill'")
     pid: Optional[int] = Field(None, description="Mã PID của tiến trình cần hạ (kill)")
 
+
 class ScreenshotRequest(BaseModel):
     machine_id: str = Field(...)
+
 
 class LiveScreenRequest(BaseModel):
     machine_id: str = Field(...)
     action: str = Field(..., description="Hành động: 'start' hoặc 'stop'")
+    fps: Optional[int] = Field(10, description="Số frame/giây (mặc định 10, tối đa 30)")
+
 
 class KeyloggerControlRequest(BaseModel):
     machine_id: str = Field(...)
-    action: str = Field(..., description="Hành động: 'start', 'stop', 'get_logs'")
+    action: str = Field(..., description="Hành động: 'start' hoặc 'stop'")
+
 
 class FileActionRequest(BaseModel):
     machine_id: str = Field(...)
-    action: str = Field(..., description="Hành động: 'list', 'delete', 'download'")
-    file_path: Optional[str] = Field(None, description="Đường dẫn file/thư mục trong Sandbox")
+    action: str = Field(..., description="Hành động: 'list' hoặc 'download'")
+    path: Optional[str] = Field("C:\\RemoteControl\\", description="Đường dẫn trong Sandbox")
+
 
 class WebcamControlRequest(BaseModel):
     machine_id: str = Field(...)
-    action: str = Field(..., description="Hành động: 'start', 'stop', 'snapshot'")
+    action: str = Field(..., description="Hành động: 'start' hoặc 'stop'")
+    fps: Optional[int] = Field(10, description="Số frame/giây (mặc định 10)")
+
 
 class PowerControlRequest(BaseModel):
     machine_id: str = Field(...)
     action: str = Field(..., description="Lệnh nguồn: 'lock', 'restart', 'shutdown', 'sleep'")
+    delay_seconds: Optional[int] = Field(0, description="Độ trễ trước khi thực hiện (giây), dùng cho restart/shutdown")
+
+
+# =========================================================================
+# 🗺️ BẢNG MAP action (REST) -> message type CHUẨN theo api_contract.md
+# =========================================================================
+
+_APP_ACTION_TYPE = {"list": "application.list", "start": "application.start", "stop": "application.stop"}
+_PROCESS_ACTION_TYPE = {"list": "process.list", "kill": "process.kill"}
+_LIVESCREEN_ACTION_TYPE = {"start": "screen.live.start", "stop": "screen.live.stop"}
+_KEYLOGGER_ACTION_TYPE = {"start": "keylogger.start", "stop": "keylogger.stop"}
+_FILE_ACTION_TYPE = {"list": "file.list", "download": "file.download"}
+_WEBCAM_ACTION_TYPE = {"start": "webcam.start", "stop": "webcam.stop"}
+_POWER_ACTION_TYPE = {
+    "lock": "power.lock",
+    "restart": "power.restart",
+    "shutdown": "power.shutdown",
+    "sleep": "power.sleep",
+}
+
+
+def _resolve_type(action_map: Dict[str, str], action: str) -> str:
+    """Map action REST -> message type chuẩn. 400 nếu action không hợp lệ/không thuộc giao thức."""
+    msg_type = action_map.get(action)
+    if msg_type is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Hành động '{action}' không hợp lệ. Các giá trị cho phép: {list(action_map.keys())}",
+        )
+    return msg_type
 
 
 # =========================================================================
@@ -74,13 +119,17 @@ async def dispatch_command_and_log(
     operator: User,
     machine_id: str,
     action_type: str,
-    payload: Dict[str, Any]
+    payload: Dict[str, Any],
+    timeout: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Hàm dùng chung hỗ trợ:
     1. Kiểm tra máy Agent có tồn tại và đang Online hay không.
     2. Ghi AuditLog vào CSDL (Trạng thái ban đầu: PENDING).
     3. Đẩy lệnh sang Gateway WebSocket Client để gửi tới Agent.
+
+    action_type PHẢI là message type chuẩn theo docs/api_contract.md
+    (VD: "application.list", "screen.live.start", "power.lock"...).
     """
     # 1. Kiểm tra sự tồn tại của máy Agent
     machine = db.query(Machine).filter(Machine.machine_id == machine_id).first()
@@ -89,7 +138,7 @@ async def dispatch_command_and_log(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Không tìm thấy máy Agent có ID: {machine_id}"
         )
-    
+
     if machine.status != "online":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -109,11 +158,14 @@ async def dispatch_command_and_log(
     db.commit()
 
     # 3. Gửi lệnh tới Gateway Server qua kết nối WebSocket Client
+    # (gateway_client.send_command tự đặt payload.destinationMachineId theo
+    # Command Routing Convention - xem api_contract.md)
     try:
         response = await gateway_client.send_command(
             target_machine_id=machine_id,
             command_type=action_type,
-            payload=payload
+            payload=payload,
+            timeout=timeout,
         )
         # Cập nhật trạng thái Audit Log thành công
         log_entry.status = "success"
@@ -142,10 +194,16 @@ async def control_applications(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Quản lý ứng dụng: Liệt kê danh sách ứng dụng, %CPU hoặc Start/Stop ứng dụng.
+    Quản lý ứng dụng: application.list / application.start / application.stop.
     """
-    payload = {"action": req.action, "app_name": req.app_name}
-    return await dispatch_command_and_log(db, current_user, req.machine_id, "app.control", payload)
+    msg_type = _resolve_type(_APP_ACTION_TYPE, req.action)
+    if req.action == "start":
+        payload = {"path": req.path}
+    elif req.action == "stop":
+        payload = {"pid": req.pid}
+    else:
+        payload = {}
+    return await dispatch_command_and_log(db, current_user, req.machine_id, msg_type, payload)
 
 
 # --- MODULE 2: PROCESS CONTROL ---
@@ -156,25 +214,24 @@ async def control_processes(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Quản lý tiến trình (psutil): Xem %CPU, %RAM và Tiêu diệt (Kill) Tiến trình theo PID.
+    Quản lý tiến trình: process.list / process.kill.
     """
-    payload = {"action": req.action, "pid": req.pid}
-    return await dispatch_command_and_log(db, current_user, req.machine_id, "process.control", payload)
+    msg_type = _resolve_type(_PROCESS_ACTION_TYPE, req.action)
+    payload = {"pid": req.pid} if req.action == "kill" else {}
+    return await dispatch_command_and_log(db, current_user, req.machine_id, msg_type, payload)
 
 
 # --- MODULE 3: SCREENSHOT ---
-@router.post("/screenshot", summary="3. Chụp ảnh màn hình (Cần User Accept)")
+@router.post("/screenshot", summary="3. Chụp ảnh màn hình")
 async def control_screenshot(
     req: ScreenshotRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Chụp ảnh màn hình (Screenshot) và gửi về dạng JPEG base64.
-    *Yêu cầu:* Phải có sự xác nhận Pop-up từ phía End-User trên Agent.
+    screen.screenshot - Không nằm trong Sensitive Feature List, không cần Permission Confirmation.
     """
-    payload = {}
-    return await dispatch_command_and_log(db, current_user, req.machine_id, "screen.screenshot", payload)
+    return await dispatch_command_and_log(db, current_user, req.machine_id, "screen.screenshot", {})
 
 
 # --- MODULE 4: LIVE SCREEN ---
@@ -185,11 +242,15 @@ async def control_live_screen(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Xem trực tiếp (Live Stream) màn hình máy Agent.
-    *Yêu cầu:* Phải có sự xác nhận Pop-up từ phía End-User trên Agent.
+    screen.live.start / screen.live.stop.
+    *Yêu cầu:* screen.live.start nằm trong Sensitive Feature List - Gateway sẽ tự
+    chặn lại và chờ Permission Confirmation từ End-User trước khi forward.
     """
-    payload = {"action": req.action}
-    return await dispatch_command_and_log(db, current_user, req.machine_id, "screen.live", payload)
+    msg_type = _resolve_type(_LIVESCREEN_ACTION_TYPE, req.action)
+    payload = {"fps": req.fps or 10} if req.action == "start" else {}
+    # screen.live.start nằm trong Sensitive Feature List -> Gateway có thể chờ Permission Confirmation
+    timeout = settings.SENSITIVE_COMMAND_TIMEOUT_SECONDS if req.action == "start" else None
+    return await dispatch_command_and_log(db, current_user, req.machine_id, msg_type, payload, timeout=timeout)
 
 
 # --- MODULE 5: KEYLOGGER ---
@@ -200,48 +261,54 @@ async def control_keylogger(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Theo dõi bàn phím gõ (pynput).
-    *Yêu cầu:* Bắt buộc xin phép người dùng Agent trước khi kích hoạt.
+    keylogger.start / keylogger.stop.
+    *Yêu cầu:* keylogger.start nằm trong Sensitive Feature List.
     """
-    payload = {"action": req.action}
-    return await dispatch_command_and_log(db, current_user, req.machine_id, "keylogger.control", payload)
+    msg_type = _resolve_type(_KEYLOGGER_ACTION_TYPE, req.action)
+    # keylogger.start nằm trong Sensitive Feature List -> có thể chờ Permission Confirmation
+    timeout = settings.SENSITIVE_COMMAND_TIMEOUT_SECONDS if req.action == "start" else None
+    return await dispatch_command_and_log(db, current_user, req.machine_id, msg_type, {}, timeout=timeout)
 
 
 # --- MODULE 6: FILE TRANSFER & MANAGEMENT ---
-@router.post("/file/action", summary="6a. Quản lý Tệp tin trong Thư mục Sandbox")
+@router.post("/file/action", summary="6a. Xem/Tải tệp trong Thư mục Sandbox")
 async def control_file_action(
     req: FileActionRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Xem danh sách, xóa hoặc yêu cầu tải file.
-    *Ràng buộc an toàn:* Giới hạn chỉ truy cập trong thư mục Sandbox được cấp phép.
+    file.list / file.download. Chỉ thao tác trong sandbox folder (theo security_design.md).
     """
-    payload = {"action": req.action, "file_path": req.file_path}
-    return await dispatch_command_and_log(db, current_user, req.machine_id, "file.action", payload)
+    msg_type = _resolve_type(_FILE_ACTION_TYPE, req.action)
+    payload = {"path": req.path or "C:\\RemoteControl\\"}
+    # file.download có thể chứa tới 50MB base64 (api_contract.md) -> cần timeout dài hơn mặc định
+    file_timeout = 60 if req.action == "download" else None
+    return await dispatch_command_and_log(db, current_user, req.machine_id, msg_type, payload, timeout=file_timeout)
 
 
 @router.post("/file/upload", summary="6b. Tải tệp tin lên máy Agent (Upload)")
 async def upload_file_to_agent(
     machine_id: str = Form(...),
-    target_dir: str = Form(...),
+    destination_path: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Upload tệp tin từ Admin Web lên thư mục Sandbox của máy Agent.
+    file.upload - payload theo đúng api_contract.md:
+    { destinationPath, filename, content (base64), sizeBytes }.
     """
+    import base64
+
     content = await file.read()
     payload = {
-        "action": "upload",
-        "file_name": file.filename,
-        "target_dir": target_dir,
-        "file_bytes_len": len(content)
+        "destinationPath": destination_path,
+        "filename": file.filename,
+        "content": base64.b64encode(content).decode("ascii"),
+        "sizeBytes": len(content),
     }
-    # Đóng gói và truyền dữ liệu
-    return await dispatch_command_and_log(db, current_user, machine_id, "file.upload", payload)
+    return await dispatch_command_and_log(db, current_user, machine_id, "file.upload", payload, timeout=60)
 
 
 # --- MODULE 7: WEBCAM CONTROL ---
@@ -252,11 +319,14 @@ async def control_webcam(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Mở Webcam xem ảnh/video.
-    *An toàn & Riêng tư:* Phát tín hiệu yêu cầu Pop-up xác nhận và hiển thị chấm chớp đỏ cảnh báo trên máy Agent.
+    webcam.start / webcam.stop.
+    *Yêu cầu:* webcam.start nằm trong Sensitive Feature List.
     """
-    payload = {"action": req.action}
-    return await dispatch_command_and_log(db, current_user, req.machine_id, "webcam.control", payload)
+    msg_type = _resolve_type(_WEBCAM_ACTION_TYPE, req.action)
+    payload = {"fps": req.fps or 10} if req.action == "start" else {}
+    # webcam.start nằm trong Sensitive Feature List -> có thể chờ Permission Confirmation
+    timeout = settings.SENSITIVE_COMMAND_TIMEOUT_SECONDS if req.action == "start" else None
+    return await dispatch_command_and_log(db, current_user, req.machine_id, msg_type, payload, timeout=timeout)
 
 
 # --- MODULE 8: POWER CONTROL ---
@@ -267,8 +337,13 @@ async def control_power(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Khóa màn hình, Khởi động lại, Tắt máy hoặc Chuyển sang chế độ Chờ (Sleep).
-    *Yêu cầu:* Xin xác nhận từ người dùng để tránh mất dữ liệu đột ngột.
+    power.lock / power.restart / power.shutdown / power.sleep.
+    *Yêu cầu:* Toàn bộ Power Control nằm trong Sensitive Feature List.
     """
-    payload = {"action": req.action}
-    return await dispatch_command_and_log(db, current_user, req.machine_id, "power.control", payload)
+    msg_type = _resolve_type(_POWER_ACTION_TYPE, req.action)
+    payload = {"delaySeconds": req.delay_seconds or 0} if req.action in ("restart", "shutdown") else {}
+    # Toàn bộ Power Control nằm trong Sensitive Feature List -> có thể chờ Permission Confirmation
+    return await dispatch_command_and_log(
+        db, current_user, req.machine_id, msg_type, payload,
+        timeout=settings.SENSITIVE_COMMAND_TIMEOUT_SECONDS,
+    )

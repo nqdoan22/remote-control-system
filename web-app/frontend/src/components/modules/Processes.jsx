@@ -1,48 +1,47 @@
 import React, { useState, useEffect } from 'react';
+import { controlProcessesApi, isWsError, getWsErrorMessage, getWsData } from '../../services/api';
 
 /**
- * Processes Module - Quản lý toàn bộ các tiến trình hệ thống (Background & Foreground)
+ * Processes Module - Quản lý toàn bộ các tiến trình hệ thống.
+ * process.list / process.kill (api_contract.md).
  */
-const Processes = ({ selectedMachine, onSendMessage, lastMessage }) => {
+const Processes = ({ selectedMachine }) => {
   const [processList, setProcessList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // 1. Lấy danh sách tiến trình hệ thống
   useEffect(() => {
     fetchProcesses();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMachine]);
 
-  // 2. Nhận kết quả từ WebSocket
-  useEffect(() => {
-    if (lastMessage && lastMessage.action === 'get_processes_response') {
-      setLoading(false);
-      if (lastMessage.status === 'success') {
-        setProcessList(lastMessage.data || []);
-      } else {
-        alert('Lỗi lấy danh sách tiến trình: ' + lastMessage.message);
-      }
-    }
-  }, [lastMessage]);
-
-  const fetchProcesses = () => {
+  const fetchProcesses = async () => {
     if (!selectedMachine) return;
     setLoading(true);
-    onSendMessage({
-      target_machine_id: selectedMachine.machineId,
-      action: 'get_processes'
-    });
+    try {
+      const res = await controlProcessesApi(selectedMachine.machineId, 'list');
+      if (isWsError(res)) {
+        alert('Lỗi lấy danh sách tiến trình: ' + getWsErrorMessage(res));
+      } else {
+        // payload.data.processes: [{ pid, name, cpuUsage, memoryMB }] theo api_contract.md
+        setProcessList(getWsData(res).processes || []);
+      }
+    } catch (err) {
+      alert('Lỗi lấy danh sách tiến trình: ' + (err?.detail || 'Không rõ nguyên nhân'));
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // Hàm diệt tiến trình (Kill Process)
-  const handleKillProcess = (pid, name) => {
+  // Hàm diệt tiến trình (process.kill)
+  const handleKillProcess = async (pid, name) => {
     if (window.confirm(`⚠️ BẠN CÓ CHẮC MUỐN DIỆT TIẾN TRÌNH: ${name} (PID: ${pid})?\nThao tác này có thể làm mất dữ liệu chưa lưu trên Client!`)) {
-      onSendMessage({
-        target_machine_id: selectedMachine.machineId,
-        action: 'kill_process',
-        payload: { pid: pid }
-      });
-      // Làm mới lại bảng sau 1 giây
+      try {
+        const res = await controlProcessesApi(selectedMachine.machineId, 'kill', { pid });
+        if (isWsError(res)) alert('Lỗi diệt tiến trình: ' + getWsErrorMessage(res));
+      } catch (err) {
+        alert('Lỗi diệt tiến trình: ' + (err?.detail || 'Không rõ nguyên nhân'));
+      }
       setTimeout(fetchProcesses, 1000);
     }
   };
@@ -99,8 +98,8 @@ const Processes = ({ selectedMachine, onSendMessage, lastMessage }) => {
                 <tr key={proc.pid}>
                   <td style={styles.td}><code>{proc.pid}</code></td>
                   <td style={styles.td}><b>{proc.name}</b></td>
-                  <td style={styles.td}>{proc.cpu_percent?.toFixed(1) ?? '0.0'}%</td>
-                  <td style={styles.td}>{(proc.memory_mb ?? 0).toFixed(1)} MB</td>
+                  <td style={styles.td}>{proc.cpuUsage?.toFixed(1) ?? '0.0'}%</td>
+                  <td style={styles.td}>{(proc.memoryMB ?? 0).toFixed(1)} MB</td>
                   <td style={styles.td}>
                     <button
                       onClick={() => handleKillProcess(proc.pid, proc.name)}
