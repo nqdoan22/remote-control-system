@@ -1,16 +1,26 @@
+Dưới đây là bản cập nhật cho file **`system_architecture.md`**.
+
+Tôi đã bổ sung các thành phần hệ thống cực kỳ quan trọng để làm nổi bật **tư duy kiến trúc** của bạn, bao gồm:
+
+1. **Tách rõ Frontend (React) và Backend (FastAPI + SQLite)** trong khối Web App.
+2. **Cập nhật luồng Command Flow thành 2 luồng riêng biệt:** Luồng thực thi trực tiếp và **Luồng yêu cầu cấp quyền (User Consent Flow)**. Đây là điểm ăn tiền lớn nhất của đồ án.
+3. **Thêm mô hình đa luồng (Multi-threading)** ở Client App (PyQt6 Main Thread & Asyncio Worker) để giải thích cách ứng dụng không bị đơ khi nhận lệnh.
+
+Bạn hãy copy đoạn mã Markdown dưới đây và dán đè vào file hiện tại nhé:
+
+```markdown
 # System Architecture
 
 ## Overview
 
-Tài liệu này mô tả kiến trúc tổng thể của hệ thống, trách nhiệm của từng thành phần và luồng xử lý chính.
+Tài liệu này mô tả kiến trúc tổng thể của hệ thống, trách nhiệm của từng thành phần, luồng xử lý thông điệp và quyết định thiết kế.
 
-Hệ thống được thiết kế theo mô hình **3-tier architecture**, gồm ba thành phần độc lập:
+Hệ thống được thiết kế theo mô hình **3-Tier Architecture** (3 lớp), gồm ba khối độc lập:
+- **Web App (Frontend + Backend + Database)**
+- **Gateway (WebSocket Broker)**
+- **Client App (Python PyQt6 Agent)**
 
-- Web App
-- Gateway
-- Client App
-
-Mỗi thành phần có một trách nhiệm riêng và giao tiếp thông qua giao thức WebSocket.
+Mỗi thành phần có một trách nhiệm riêng biệt, đảm bảo tính bảo mật (Security), sự lỏng lẻo trong liên kết (Low Coupling) và hiệu năng cao (High Performance) trong mạng LAN.
 
 ---
 
@@ -19,296 +29,183 @@ Mỗi thành phần có một trách nhiệm riêng và giao tiếp thông qua g
 ```text
                      Administrator
                            │
-                           │ HTTPS
+                           │ HTTP / REST API
                            ▼
-+------------------------------------------------+
-|                  Web App                       |
-|------------------------------------------------|
-| - Authentication                              |
-| - Business Logic                              |
-| - Dashboard                                   |
-| - Machine Management                          |
-| - Command Service                             |
-+------------------------------------------------+
++------------------------------------------------------+
+|                       WEB APP                        |
+|                                                      |
+|  [ ReactJS Frontend ] ◄──► [ FastAPI Backend ]       |
+|  - Dashboard               - Auth & JWT              |
+|  - Machine Control         - REST Endpoints          |
+|  - Live Streaming UI       - Command Service         |
+|                                  │                   |
+|                            [ SQLite DB ]             |
+|                            - users, machines, logs   |
++------------------------------------------------------+
                            │
-                    WebSocket (Authenticated)
-                           │
+                           │ WebSocket (JSON - JWT Auth)
                            ▼
-+------------------------------------------------+
-|                   Gateway                      |
-|------------------------------------------------|
-| - Authentication Manager                      |
-| - Connection Manager                          |
-| - Machine Registry                            |
-| - Message Router                              |
-| - Heartbeat Manager                           |
-| - Stream Manager                              |
-+------------------------------------------------+
++------------------------------------------------------+
+|                       GATEWAY                        |
+|  [ Python Asyncio + WebSockets ]                     |
+|  - Connection Manager (Web <-> Agents)               |
+|  - Message Router & JSON RPC                         |
+|  - Heartbeat Manager (Ping/Pong)                     |
+|  - Stream Manager (Live Screen/Webcam)               |
++------------------------------------------------------+
                            │
-                    WebSocket (Authenticated)
+                           │ WebSocket (JSON RPC)
                            │
         ┌──────────────────┼──────────────────┐
         ▼                  ▼                  ▼
 +---------------+  +---------------+  +---------------+
-| Client App A   |  | Client App B   |  | Client App N   |
+| Client App A  |  | Client App B  |  | Client App N  |
+| (PyQt6 Agent) |  | (PyQt6 Agent) |  | (PyQt6 Agent) |
 +---------------+  +---------------+  +---------------+
+
 ```
 
 ---
 
 # Component Responsibilities
 
-## Web App
+## 1. Web App
 
-Web App là thành phần mà Administrator sử dụng để quản lý hệ thống.
+Web App là trung tâm điều khiển (Control Panel) dành cho Administrator.
+Được chia làm 2 phần: Frontend (Giao diện) và Backend (Logic & Dữ liệu).
 
-### Responsibilities
+### Trách nhiệm:
 
-- Xác thực Administrator.
-- Hiển thị giao diện quản trị.
-- Quản lý danh sách Machine.
-- Gửi lệnh điều khiển.
-- Hiển thị kết quả.
-- Ghi nhận Audit Log.
+* Xác thực Administrator qua JWT.
+* Lưu trữ cấu hình hệ thống, danh sách Machine và Audit Log (SQLite).
+* Cung cấp giao diện Web trực quan (Dashboard).
+* Gửi lệnh điều khiển (Commands) sang Gateway.
+* Tiếp nhận kết quả và dữ liệu Streaming (hình ảnh, tiến trình) để hiển thị.
 
-### Không chịu trách nhiệm
+### Không chịu trách nhiệm:
 
-- Quản lý kết nối tới Client App.
-- Thực thi lệnh trên Machine.
-- Xử lý dữ liệu Streaming.
-
----
-
-## Gateway
-
-Gateway là trung tâm giao tiếp của toàn bộ hệ thống.
-
-### Responsibilities
-
-- Quản lý kết nối WebSocket.
-- Xác thực Backend và Client App.
-- Lưu danh sách Client App đang Online.
-- Định tuyến Message.
-- Quản lý Heartbeat.
-- Chuyển tiếp dữ liệu Streaming.
-- Theo dõi trạng thái kết nối.
-
-### Không chịu trách nhiệm
-
-- Business Logic.
-- Giao diện người dùng.
-- Thực thi lệnh trên Machine.
+* Không kết nối trực tiếp đến Client App (Agent).
+* Không xử lý tác vụ phần cứng trên máy Client.
 
 ---
 
-## Client App
+## 2. Gateway
 
-Client App chạy trên từng Machine, được viết bằng **Python**.
+Gateway là trạm trung chuyển (Message Broker) xử lý hàng ngàn kết nối đồng thời nhờ kiến trúc bất đồng bộ `asyncio`.
 
-### Responsibilities
+### Trách nhiệm:
 
-- Kết nối tới Gateway.
-- Thực thi Command.
-- Thu thập thông tin hệ thống.
-- Gửi kết quả về Gateway.
-- Xin xác nhận của End User khi cần.
-- Gửi Heartbeat định kỳ.
+* Quản lý và duy trì kết nối WebSocket từ cả Web App và các Client App.
+* Định tuyến (Route) thông điệp từ Admin đến đúng Machine ID mục tiêu.
+* Quản lý trạng thái Online/Offline qua cơ chế Heartbeat.
+* Băng thông rộng để chuyển tiếp dữ liệu luồng (Live Screen, Webcam).
 
-### Không chịu trách nhiệm
+### Không chịu trách nhiệm:
 
-- Xác thực Administrator.
-- Điều phối nhiều Machine.
-- Quản lý giao diện.
+* Không lưu trữ dữ liệu lâu dài (No Database).
+* Không chứa Business Logic nghiệp vụ.
+* Không có giao diện người dùng.
 
 ---
 
-# Internal Modules
+## 3. Client App (Python Agent)
 
-## Web App
+Client App là một ứng dụng Desktop chạy ngầm trên Windows, có giao diện bảo vệ quyền lợi người dùng cuối (End User).
 
-- Authentication
-- Dashboard
-- Machine Management
-- Command Service
-- Audit Log
+### Trách nhiệm:
 
----
+* Tự động duy trì kết nối WebSocket tới Gateway.
+* Khai thác dữ liệu phần cứng, tiến trình, ứng dụng (thông qua `psutil`, `win32gui`).
+* **Hiển thị Popup xin quyền (Quy tắc bảo mật cao nhất).**
+* Bật cờ cảnh báo (Đèn đỏ Webcam) khi bị giám sát.
+* Sandboxing: Chỉ cho phép thao tác file trong vùng quy định.
 
-## Gateway
+### Không chịu trách nhiệm:
 
-- Authentication Manager
-- Connection Manager
-- Machine Registry
-- Message Router
-- Heartbeat Manager
-- Stream Manager
+* Không chứa thông tin xác thực của Admin.
+* Không điều phối các Machine khác.
 
 ---
 
-## Client App
+# Internal Modules (Kiến trúc Module)
 
-- Gateway Client
-- Command Dispatcher
-- Permission Manager
-- Application Module
-- Process Module
-- Screen Module
-- Webcam Module
-- File Module
-- Power Module
-- Logger
+### Client App Threading Model (PyQt6)
+
+Để Client App không bị đơ giao diện khi xử lý lệnh và mạng, kiến trúc đa luồng (Multi-threading) được áp dụng:
+
+1. **Main Thread (GUI Thread):** Chạy vòng lặp sự kiện PyQt6, hiển thị Popup và Đèn cảnh báo Webcam.
+2. **Worker Thread (Network Thread):** Chạy vòng lặp `asyncio`, duy trì WebSocket, parse JSON lệnh. Khi cần xin quyền, Worker Thread bắn `PyQt Signal` lên Main Thread.
 
 ---
 
-# Connection Lifecycle
+# Command Flow (Luồng xử lý lệnh)
+
+Hệ thống có 2 luồng xử lý lệnh tùy thuộc vào mức độ nhạy cảm của chức năng.
+
+## 1. Direct Execution Flow (Chức năng bình thường)
+
+*(Ví dụ: Xem danh sách Process, Khởi động Application)*
 
 ```text
-Client App Start
-      │
-      ▼
-Connect Gateway
-      │
-      ▼
-Authenticate
-      │
-      ▼
-Register Machine
-      │
-      ▼
-Online
-      │
-      ▼
-Heartbeat
-      │
-      ▼
-Receive Command
-      │
-      ▼
-Execute Command
-      │
-      ▼
-Send Result
-      │
-      ▼
-Disconnect
-      │
-      ▼
-Reconnect
+Admin ──> Web App ──> Gateway ──> Client App 
+                                      │
+                                [Thực thi ngay]
+                                      │
+Admin <── Web App <── Gateway <───────┘ (Trả về kết quả & Ghi Audit Log)
+
+```
+
+## 2. User Consent Flow (Chức năng nhạy cảm)
+
+*(Ví dụ: Live Screen, Keylogger, Webcam, Shutdown, File)*
+
+```text
+Admin ──> Web App ──> Gateway ──> Client App (Worker Thread)
+                                      │
+                                      ▼ (Bắn Signal)
+                             [Main Thread: Bật Popup xin quyền]
+                                      │
+       +------------------------------+------------------------------+
+       │                              │                              │
+[User Accept]                  [User Reject]               [Timeout 15s]
+       │                              │                              │
+[Thực thi lệnh]               [Hủy thực thi]                 [Hủy thực thi]
+       │                              │                              │
+       +------------------------------+------------------------------+
+                                      │
+Admin <── Web App <── Gateway <───────┘ (Gửi phản hồi & Ghi Audit Log)
+
 ```
 
 ---
 
-# Command Flow
+# Design Principles & Decisions (Quyết định thiết kế)
 
-```text
-Administrator
-      │
-      ▼
-Web App
-      │
-      ▼
-Gateway
-      │
-      ▼
-Client App
-      │
-Execute Command
-      │
-      ▼
-Gateway
-      │
-      ▼
-Web App
-```
+## 1. Tại sao dùng Gateway làm trung gian thay vì P2P?
 
----
+* **Bảo mật:** Web App và Client App không bao giờ biết IP thực của nhau.
+* **Vượt NAT/Tường lửa:** Client App chủ động kết nối ra Gateway (Outbound), do đó không cần mở port trên máy tính End User.
+* **Dễ mở rộng (Scalability):** Có thể thêm hàng trăm Machine mà không làm quá tải Backend của Web App.
 
-# Design Principles
+## 2. Tại sao thiết kế Sandboxing cho File Transfer?
 
-## Single Responsibility
+Nếu cho phép Admin truy cập toàn bộ ổ cứng (`C:\`), nguy cơ lộ lọt dữ liệu cá nhân của End User là rất cao (Directory Traversal Attack). Việc giới hạn một thư mục Sandbox (VD: `C:\AgentSandbox`) thể hiện tư duy an toàn thông tin khắt khe.
 
-Mỗi thành phần chỉ đảm nhiệm một nhóm chức năng chính.
+## 3. Single Responsibility Principle (SRP)
 
----
-
-## Low Coupling
-
-Các thành phần giao tiếp thông qua protocol thay vì phụ thuộc trực tiếp vào implementation của nhau.
-
----
-
-## High Cohesion
-
-Các chức năng liên quan được nhóm trong cùng một module.
-
----
-
-## Scalability
-
-Gateway có thể quản lý đồng thời nhiều Client App.
-
-Kiến trúc cho phép bổ sung thêm Machine mà không cần thay đổi Web App.
-
----
-
-## Maintainability
-
-Các module được tách biệt rõ ràng, giúp dễ bảo trì và mở rộng.
-
----
-
-# Design Decisions
-
-## Tại sao sử dụng Gateway?
-
-Gateway đóng vai trò là điểm trung gian duy nhất giữa Web App và Client App.
-
-Lợi ích:
-
-- Giảm coupling giữa các thành phần.
-- Web App chỉ cần quản lý một kết nối.
-- Dễ mở rộng nhiều Machine.
-- Tập trung quản lý kết nối và trạng thái Client App.
-
----
-
-## Tại sao Client App chủ động kết nối?
-
-Client App luôn chủ động kết nối tới Gateway thay vì Gateway kết nối trực tiếp tới Client App.
-
-Lợi ích:
-
-- Không cần mở cổng trên Machine.
-- Dễ xử lý khi Client App mất kết nối.
-- Đơn giản hóa quá trình triển khai.
-
----
-
-## Tại sao sử dụng WebSocket?
-
-WebSocket hỗ trợ giao tiếp hai chiều theo thời gian thực.
-
-Phù hợp cho:
-
-- Heartbeat
-- Live Screen
-- Webcam Streaming
-- Command & Response
-
----
-
-# Assumptions
-
-- Tất cả Machine đều chạy Windows.
-- Client App đã được cài đặt trước.
-- Các thành phần hoạt động trong cùng mạng LAN.
+* Frontend chỉ lo Render UI.
+* Backend chỉ lo Logic Database & JWT Auth.
+* Gateway chỉ lo Định tuyến WebSocket.
+* Client App chỉ lo Tương tác OS & Người dùng.
 
 ---
 
 # Related Documents
 
-- project_requirements.md
-- system_specification.md
-- communication_protocol.md
-- security_design.md
-- tech_stack.md
+* `project_requirements.md`
+* `system_specification.md`
+* `communication_protocol.md`
+* `security_design.md`
+* `TECH_STACK.md`
+
+```

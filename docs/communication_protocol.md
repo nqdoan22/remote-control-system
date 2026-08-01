@@ -2,470 +2,273 @@
 
 ## Overview
 
-Tài liệu này mô tả giao thức truyền thông giữa các thành phần trong hệ thống.
+Tài liệu này định nghĩa giao thức truyền thông tiêu chuẩn (Standardized Communication Protocol) giữa các thành phần trong hệ thống.
 
 Các kết nối bao gồm:
+- **Web App (Backend) ↔ Gateway**
+- **Gateway ↔ Client App (Agent)**
 
-- Web App ↔ Gateway
-- Gateway ↔ Client App
-
-Toàn bộ dữ liệu được truyền dưới dạng **JSON** thông qua **WebSocket**.
+Để đảm bảo tính đồng nhất, tốc độ cao theo thời gian thực và dễ dàng gỡ lỗi (debug), toàn bộ dữ liệu trong hệ thống được truyền tải dưới định dạng **JSON** thông qua giao thức **WebSocket (ws://)**.
 
 ---
 
 # Communication Model
 
 ```text
-Administrator
-      │
+[ Administrator ]
+      │ (HTTPS / REST)
       ▼
-   Web App
++-----------+
+|  Web App  | (Tạo JSON Command)
++-----------+
       │
-      │ Request
+      │ (WebSocket Request + JWT)
       ▼
-   Gateway
++-----------+
+|  Gateway  | (Message Broker)
++-----------+
       │
-      │ Request
+      │ (WebSocket Request định tuyến theo ID)
       ▼
-    Client App
++------------+
+| Client App | (Thực thi & Bật Popup xin quyền)
++------------+
       │
-      │ Response
+      │ (WebSocket Response / Stream Base64)
       ▼
-   Gateway
++-----------+
+|  Gateway  | (Chuyển tiếp)
++-----------+
       │
-      │ Response
+      │ (WebSocket Response)
       ▼
-   Web App
++-----------+
+|  Web App  | (Ghi Audit Log & Cập nhật UI)
++-----------+
+
 ```
 
-Gateway chỉ thực hiện:
+**Vai trò của Gateway:**
 
-- Authentication
-- Authorization
-- Routing
-- Connection Management
-
-Gateway **không xử lý Business Logic**.
+* Chỉ thực hiện: Authentication (Xác thực kết nối), Routing (Định tuyến thông điệp dựa trên `destination`), và Connection Management (Quản lý Heartbeat).
+* **Tuyệt đối KHÔNG xử lý Business Logic**, không lưu trữ hay giải mã dữ liệu Streaming.
 
 ---
 
-# General Message Format
+# General Message Format (Định dạng Thông điệp)
 
-Mọi message trong hệ thống đều sử dụng cùng một cấu trúc.
+Mọi message giao tiếp trong hệ thống đều tuân thủ chặt chẽ một cấu trúc JSON duy nhất (JSON RPC-like).
 
 ```json
 {
-  "messageId": "uuid",
+  "messageId": "550e8400-e29b-41d4-a716-446655440000",
   "type": "process.list",
   "timestamp": 1710000000,
   "source": "gateway",
   "destination": "client-app-01",
-  "payload": {}
-}
-```
-
----
-
-## Fields
-
-| Field       | Description                       |
-| ----------- | --------------------------------- |
-| messageId   | Mã định danh duy nhất của message |
-| type        | Loại message                      |
-| timestamp   | Thời điểm gửi                     |
-| source      | Thành phần gửi                    |
-| destination | Thành phần nhận                   |
-| payload     | Dữ liệu của message               |
-
----
-
-# Message Types
-
-Hệ thống sử dụng ba loại message.
-
-## Request
-
-Yêu cầu thực hiện một hành động.
-
-Ví dụ:
-
-```json
-{
-  "type": "process.kill",
   "payload": {
-    "pid": 1234
+    "filter": "chrome"
   }
 }
+
 ```
+
+## Fields Definition
+
+| Field | Kiểu dữ liệu | Description (Mô tả) |
+| --- | --- | --- |
+| `messageId` | String (UUID) | Mã định danh duy nhất của message để map Request với Response. |
+| `type` | String | Loại thao tác/lệnh (VD: `system.heartbeat`, `screen.live.start`). |
+| `timestamp` | Integer | Thời điểm gửi (Unix Epoch Time) để kiểm tra độ trễ mạng. |
+| `source` | String | ID của thành phần gửi (VD: `webapp-backend`, `client-id-123`). |
+| `destination` | String | ID của thành phần nhận (`gateway` hoặc `client-id-xyz`). |
+| `payload` | Object | Dữ liệu linh hoạt chứa tham số lệnh hoặc kết quả trả về. |
 
 ---
 
-## Response
+# Message Types (Phân loại Thông điệp)
 
-Phản hồi cho một Request.
+Hệ thống sử dụng 3 loại message chính được phân biệt qua trường `type`.
+
+## 1. Request (Yêu cầu)
+
+Là lệnh gửi từ Web App xuống Client App. Bắt buộc phải có Response tương ứng.
 
 ```json
 {
+  "messageId": "req-001",
+  "type": "process.kill",
+  "source": "webapp",
+  "destination": "client-01",
+  "payload": { "pid": 1234 }
+}
+
+```
+
+## 2. Response (Phản hồi)
+
+Kết quả thực thi từ Client App gửi về Web App. Sử dụng lại `messageId` của Request gốc.
+
+```json
+{
+  "messageId": "req-001", 
   "type": "response",
+  "source": "client-01",
+  "destination": "webapp",
   "payload": {
     "success": true,
-    "data": {}
+    "data": { "message": "Process 1234 terminated successfully" }
   }
 }
+
 ```
 
----
+## 3. Event (Sự kiện / Luồng liên tục)
 
-## Event
-
-Thông báo một sự kiện.
-
-Ví dụ:
+Dùng cho tín hiệu Heartbeat hoặc dữ liệu Stream không cần phản hồi trực tiếp.
 
 ```json
 {
-  "type": "heartbeat",
+  "messageId": "evt-002",
+  "type": "system.heartbeat",
+  "source": "client-01",
+  "destination": "gateway",
   "payload": {
-    "status": "online"
+    "status": "online",
+    "cpu_usage": 15.2
   }
 }
+
 ```
 
 ---
 
-# Message Naming Convention
+# Message Naming Convention (Quy tắc đặt tên Type)
 
-Tên message sử dụng quy tắc:
+Tên message tuân theo format: `[module].[action]`
 
-```text
-module.action
-```
-
-Ví dụ:
-
-```text
-application.list
-application.start
-application.stop
-
-process.list
-process.kill
-
-screen.screenshot
-screen.live.start
-screen.live.stop
-
-webcam.start
-webcam.stop
-
-keylogger.start
-keylogger.stop
-
-file.upload
-file.download
-
-power.lock
-power.restart
-power.shutdown
-power.sleep
-```
-
-Quy tắc này giúp dễ mở rộng khi bổ sung module mới.
+| Module | Lệnh (Actions) |
+| --- | --- |
+| **system** | `heartbeat`, `auth` |
+| **application** | `list`, `start`, `stop` |
+| **process** | `list`, `kill` |
+| **screen** | `screenshot`, `live.start`, `live.stop`, `live.frame` |
+| **webcam** | `start`, `stop`, `frame` |
+| **keylogger** | `start`, `stop`, `data` |
+| **file** | `list`, `upload`, `download` |
+| **power** | `lock`, `restart`, `shutdown`, `sleep` |
 
 ---
 
-# Authentication Flow
+# Authentication Flow (Luồng Xác thực)
 
-## Web App Authentication
+## 1. Web App (Backend) Authentication
 
-```text
-Web App
-    │
-    │ 1. Connect WebSocket
-    ▼
-Gateway
-    │
-    │ 2. Receive auth.webapp { token }
-    │ 3. Validate JWT token
-    ▼
-Connection Accepted / Rejected
-```
+Web App Backend đóng vai trò như một Super Client. Khi mở WebSocket tới Gateway, thông điệp đầu tiên bắt buộc phải là `system.auth` chứa **JWT Secret**.
 
-Chi tiết JWT token spec xem tại `security_design.md`.
+## 2. Client App Authentication
 
----
-
-## Client App Authentication
-
-```text
-Client App
-   │
-   │ 1. Connect WebSocket
-   ▼
-Gateway
-   │
-   │ 2. Receive auth.client { machineId, machineSecret, hostname, ipAddress }
-   │ 3. Validate credentials
-   │ 4. Register vào Machine Registry
-   ▼
-Connection Accepted / Rejected
-```
-
-Sau khi xác thực thành công, Client App sẽ được thêm vào Machine Registry.
-
-Chi tiết payload xem tại `api_contract.md`.
-
----
-
-# Heartbeat
-
-Client App gửi Heartbeat định kỳ.
+Khi Agent khởi động, nó mở kết nối và gửi thông tin định danh:
 
 ```json
 {
-  "type": "heartbeat",
+  "type": "system.auth",
+  "source": "client-01",
+  "destination": "gateway",
   "payload": {
-    "status": "online"
+    "machineSecret": "d8e8fca2dc0f896fd7cb4cb0031ba249"
   }
 }
+
 ```
 
-Gateway sử dụng Heartbeat để:
-
-- Kiểm tra Client App còn hoạt động.
-- Cập nhật trạng thái Machine.
-- Phát hiện mất kết nối.
-
-## Heartbeat Parameters
-
-| Parameter             | Value | Mô tả                                                        |
-| --------------------- | ----- | ------------------------------------------------------------ |
-| `HEARTBEAT_INTERVAL`  | 15s   | Client App gửi heartbeat mỗi 15 giây                        |
-| `HEARTBEAT_TIMEOUT`   | 45s   | Không nhận được heartbeat trong 45s → Gateway đánh dấu Offline |
-| `RECONNECT_INTERVAL`  | 5s    | Client App thử kết nối lại sau mỗi 5 giây                   |
-| `RECONNECT_MAX_RETRY` | ∞     | Client App thử kết nối lại vô thời hạn                      |
+*Nếu sai Secret, Gateway đóng kết nối ngay lập tức với mã code `1008 Policy Violation`.*
 
 ---
 
-# Permission Confirmation Flow
+# Data Streaming & File Transfer (Truyền tải Dữ liệu lớn)
 
-Một số chức năng nhạy cảm yêu cầu End User xác nhận trước khi thực hiện.
+Vì WebSocket trong dự án thống nhất dùng chuỗi JSON, các dữ liệu nhị phân (Ảnh Screenshot, Khung hình Webcam, File) **bắt buộc phải được mã hóa sang chuỗi Base64** trước khi đưa vào trường `payload`.
 
-Danh sách chức năng nhạy cảm và message types tương ứng xem tại `api_contract.md` — **Sensitive Feature List**.
+## Streaming (Live Screen / Webcam)
 
-Luồng xử lý:
-
-```text
-Web App
-    │
-    │ [feature].start  (vd: screen.live.start)
-    ▼
-Gateway
-    │
-    │ permission.request
-    ▼
-Client App
-    │
-    │ Hiển thị Permission Dialog cho End User
-    │
-    ├── Accept → permission.response { granted: true }
-    │               → Gateway chuyển tiếp lệnh gốc tới Client App
-    │
-    └── Reject → permission.response { granted: false }
-                    → Gateway trả error PERMISSION_DENIED về Web App
-```
-
-- Timeout xác nhận: **30 giây**. Nếu End User không phản hồi, Gateway trả về `PERMISSION_TIMEOUT`.
-- Chi tiết payload của `permission.request` và `permission.response` xem tại `api_contract.md`.
-
----
-
-# Command Flow
-
-```text
-Administrator
-      │
-      ▼
-Web App
-      │
-      ▼
-Gateway
-      │
-      ▼
-  Client App
-      │
-Execute
-      │
-      ▼
-Gateway
-      │
-      ▼
-Web App
-```
-
-Mỗi Request phải có đúng một Response.
-
----
-
-# Streaming
-
-Streaming được sử dụng cho:
-
-- Live Screen
-- Webcam
-
-Luồng xử lý:
-
-```text
-Start Stream → Frame → Frame → Frame → Stop Stream
-```
-
-Gateway chỉ chuyển tiếp dữ liệu, không xử lý hình ảnh.
-
-Chi tiết frame format (encoding, FPS, kích thước tối đa) xem tại `api_contract.md`.
-
----
-
-# File Transfer
-
-Quy trình Upload / Download:
-
-```text
-Upload:
-
-Web App
-
-↓
-
-Gateway
-
-↓
-
-Client App
-
-↓
-
-Sandbox Folder
-
-↓
-
-Gateway
-
-↓
-
-Web App
-
-Download:
-
-Web App
-
-↓
-
-Gateway
-
-↓
-
-Client App
-↓
-
-Sandbox Folder
-
-↓
-
-Gateway
-
-↓
-
-Web App
-```
-
-Client App chỉ được phép truy cập thư mục Sandbox.
-
-Mọi yêu cầu file transfer phải kiểm tra đường dẫn trước khi thực hiện.
-
-Nếu đường dẫn nằm ngoài Sandbox, hệ thống trả về `INVALID_PATH`.
-
-Chi tiết file transfer payload và giới hạn kích thước xem tại `api_contract.md`.
-
-# Error Response
-
-Nếu xảy ra lỗi, Client App hoặc Gateway trả về:
+Client App chụp ảnh, nén JPEG, mã hóa Base64 và gửi liên tục:
 
 ```json
 {
+  "type": "screen.live.frame",
+  "payload": {
+    "image_base64": "iVBORw0KGgoAAAANSUhEUgAA..."
+  }
+}
+
+```
+
+## File Transfer
+
+Tệp tin được chia nhỏ (Chunking) để không làm nghẽn luồng JSON:
+
+* Client App kiểm tra đường dẫn thư mục Sandbox. Nếu hợp lệ, tiến hành đọc file.
+* Đóng gói từng phần file bằng Base64 và gửi đi.
+* Nếu cố tình đọc ngoài Sandbox (VD: `C:\Windows`), Client trả về mã lỗi `INVALID_PATH`.
+
+---
+
+# Error Handling & Standard Codes
+
+Nếu có lỗi (Bao gồm cả việc End User từ chối lệnh), Client trả về message có type `error`.
+
+```json
+{
+  "messageId": "req-002",
   "type": "error",
   "payload": {
-    "code": "PERMISSION_DENIED",
-    "message": "Permission denied."
+    "code": "USER_REJECTED",
+    "message": "End User denied the webcam request."
   }
 }
+
 ```
 
----
+## Danh sách Error Codes chuẩn:
 
-## Standard Error Codes
-
-Danh sách đầy đủ error codes xem tại `api_contract.md` — **Error Codes**.
-
-Các error codes chính:
-
-```text
-AUTHENTICATION_FAILED    — xác thực thất bại
-AUTHORIZATION_FAILED     — không đủ quyền
-MACHINE_OFFLINE          — máy không online
-MACHINE_NOT_FOUND        — không tìm thấy machine
-INVALID_COMMAND          — lệnh không hợp lệ
-PERMISSION_DENIED        — End User từ chối
-PERMISSION_TIMEOUT       — End User không phản hồi trong 30s
-INVALID_PATH             — đường dẫn ngoài sandbox
-FILE_TOO_LARGE           — file vượt quá 50 MB
-ALREADY_RUNNING          — chức năng đang chạy rồi
-TIMEOUT                  — không nhận được phản hồi
-INTERNAL_ERROR           — lỗi hệ thống
-```
+| Mã lỗi | Mô tả nguyên nhân |
+| --- | --- |
+| `AUTHENTICATION_FAILED` | Sai Token hoặc sai Machine Secret. |
+| `MACHINE_OFFLINE` | Gateway không tìm thấy Client ID trong Registry. |
+| `INVALID_COMMAND` | Lệnh không tồn tại hoặc sai format JSON. |
+| `USER_REJECTED` | **End User bấm Reject trên Popup xin quyền.** |
+| `CONSENT_TIMEOUT` | **End User không phản hồi sau 15 giây (Auto-Reject).** |
+| `INVALID_PATH` | Cố ý truy cập file ngoài thư mục Sandbox. |
+| `INTERNAL_ERROR` | Lỗi xảy ra trong lúc gọi thư viện hệ thống (psutil, cv2). |
 
 ---
 
-# Design Decisions
+# Design Decisions (Quyết định thiết kế)
 
-## Tại sao sử dụng JSON?
+1. **Tại sao sử dụng duy nhất JSON?**
+* Dễ đọc, dễ debug và log lại vào Database (SQLite hỗ trợ JSON rất tốt).
+* Python (`json`) và Javascript (Web) phân tích cú pháp (parse) JSON nguyên bản với hiệu năng cực cao.
 
-- Dễ đọc.
-- Dễ debug.
-- Dễ mở rộng.
-- Hỗ trợ tốt trong Python và JavaScript.
 
----
+2. **Tại sao mọi Request đều cần có `messageId`?**
+* Do tính chất bất đồng bộ (Asynchronous) của WebSocket, Web App có thể gửi nhiều lệnh cùng lúc. `messageId` giúp Backend biết chính xác phản hồi `response` này thuộc về `request` nào.
 
-## Tại sao thống nhất một Message Format?
 
-- Đơn giản hóa việc xử lý.
-- Giảm số lượng parser.
-- Dễ bảo trì.
+3. **Mã hóa Base64 cho Video Stream có làm chậm hệ thống không?**
+* Có tăng dung lượng payload (~33%), nhưng chấp nhận được trong môi trường mạng LAN (Băng thông thường từ 100Mbps - 1Gbps). Đổi lại, kiến trúc Gateway đơn giản đi rất nhiều do không phải xử lý phân tách gói tin Binary và Text riêng biệt.
 
----
 
-## Tại sao mọi Request đều có Response?
-
-- Theo dõi được trạng thái thực hiện.
-- Dễ xử lý Timeout.
-- Thuận tiện cho Audit Log.
-
----
-
-# Assumptions
-
-- Tất cả các kết nối đều sử dụng WebSocket.
-- Message luôn được gửi dưới dạng JSON.
-- Gateway là thành phần trung gian duy nhất.
 
 ---
 
 # Related Documents
 
-- project_requirements.md
-- system_specification.md
-- system_architecture.md
-- security_design.md
-- TECH_STACK.md
-- **api_contract.md** — payload spec đầy đủ cho mọi message type
+* `project_requirements.md`
+* `system_specification.md`
+* `system_architecture.md`
+* `security_design.md`
+* `TECH_STACK.md`
+
+```
+

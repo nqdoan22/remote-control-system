@@ -19,6 +19,11 @@ logger = logging.getLogger("gateway.connection_manager")
 
 
 class ConnectionManager:
+    """
+    Lớp quản lý tập trung toàn bộ kết nối WebSocket trong Gateway.
+    Stateless - Chỉ lưu giữ trạng thái kết nối trong bộ nhớ RAM (In-Memory).
+    """
+
     def __init__(self):
         # machineId -> websocket
         self._client_sockets: dict[str, object] = {}

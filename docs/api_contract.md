@@ -11,9 +11,9 @@ Tài liệu bao gồm:
 - Định nghĩa payload cho từng message type.
 - Message flow cho Permission Confirmation.
 - Streaming frame format.
-- File transfer protocol.
+- File transfer protocol (Sandboxed).
 - Heartbeat parameters.
-- Danh sách đầy đủ error codes.
+- Danh sách đầy đủ error codes chuẩn.
 
 > Phần mô tả tổng quan giao thức và design rationale xem tại `communication_protocol.md`.
 
@@ -37,30 +37,32 @@ Mọi chức năng **không có trong bảng trên** đều không yêu cầu x�
 
 ---
 
-# Heartbeat Parameters
+# System Messages & Heartbeat
 
-| Parameter             | Value  | Mô tả                                                   |
-| --------------------- | ------ | ------------------------------------------------------- |
-| `HEARTBEAT_INTERVAL`  | 15s    | Client App gửi heartbeat mỗi 15 giây                   |
-| `HEARTBEAT_TIMEOUT`   | 45s    | Nếu không nhận được heartbeat trong 45s → đánh dấu Offline |
-| `RECONNECT_INTERVAL`  | 5s     | Client App thử kết nối lại sau mỗi 5 giây              |
-| `RECONNECT_MAX_RETRY` | ∞      | Client App thử kết nối lại vô thời hạn                 |
+| Parameter             | Value  | Mô tả                                                       |
+| --------------------- | ------ | ----------------------------------------------------------- |
+| `HEARTBEAT_INTERVAL`  | 5s     | Client App gửi heartbeat mỗi 5 giây                         |
+| `HEARTBEAT_TIMEOUT`   | 15s    | Nếu rớt heartbeat 3 lần liên tiếp (15s) → đánh dấu Offline  |
+| `RECONNECT_INTERVAL`  | 5s     | Client App thử kết nối lại sau mỗi 5 giây                   |
+| `RECONNECT_MAX_RETRY` | ∞      | Client App thử kết nối lại vô thời hạn                      |
 
-### Heartbeat Message
+### system.heartbeat
 
 **Client App → Gateway**
 
 ```json
 {
   "messageId": "uuid",
-  "type": "heartbeat",
+  "type": "system.heartbeat",
   "timestamp": 1710000000,
   "source": "client-app-01",
   "destination": "gateway",
   "payload": {
-    "status": "online"
+    "status": "online",
+    "cpu_usage": 15.2
   }
 }
+
 ```
 
 ---
@@ -74,17 +76,15 @@ Mọi chức năng **không có trong bảng trên** đều không yêu cầu x�
 ```json
 {
   "messageId": "uuid",
-  "type": "auth.client",
+  "type": "system.auth",
   "timestamp": 1710000000,
   "source": "client-app-01",
   "destination": "gateway",
   "payload": {
-    "machineId": "machine-uuid",
-    "machineSecret": "secret-string",
-    "hostname": "DESKTOP-ABC123",
-    "ipAddress": "192.168.1.100"
+    "machineSecret": "d8e8fca2dc0f896fd7cb4cb0031ba249"
   }
 }
+
 ```
 
 **Gateway → Client App** (response)
@@ -103,6 +103,7 @@ Mọi chức năng **không có trong bảng trên** đều không yêu cầu x�
     }
   }
 }
+
 ```
 
 ---
@@ -114,7 +115,7 @@ Mọi chức năng **không có trong bảng trên** đều không yêu cầu x�
 ```json
 {
   "messageId": "uuid",
-  "type": "auth.webapp",
+  "type": "system.auth",
   "timestamp": 1710000000,
   "source": "webapp",
   "destination": "gateway",
@@ -122,6 +123,7 @@ Mọi chức năng **không có trong bảng trên** đều không yêu cầu x�
     "token": "jwt-token-from-backend"
   }
 }
+
 ```
 
 **Gateway → Web App** (response)
@@ -138,6 +140,7 @@ Mọi chức năng **không có trong bảng trên** đều không yêu cầu x�
     "data": {}
   }
 }
+
 ```
 
 ---
@@ -159,7 +162,7 @@ Gateway
   ▼
 Client App
   │
-  │ Hiển thị Permission Dialog cho End User
+  │ Hiển thị Popup (Always-on-top) cho End User
   │
   ├── Accept → permission.response { granted: true }
   └── Reject → permission.response { granted: false }
@@ -168,7 +171,8 @@ Client App
       Gateway
         │
         ├── granted: true  → chuyển tiếp lệnh gốc tới Client App
-        └── granted: false → trả error PERMISSION_DENIED về Web App
+        └── granted: false → trả error USER_REJECTED về Web App
+
 ```
 
 ## permission.request
@@ -189,14 +193,8 @@ Client App
     "originalMessageId": "uuid-of-original-request"
   }
 }
-```
 
-| Field             | Mô tả                                          |
-| ----------------- | ---------------------------------------------- |
-| `permissionId`    | ID duy nhất để map với response                |
-| `feature`         | Tên chức năng yêu cầu xác nhận (module.action) |
-| `requestedBy`     | Username của Administrator                     |
-| `originalMessageId` | messageId của lệnh gốc cần thực hiện sau khi xác nhận |
+```
 
 ## permission.response
 
@@ -214,11 +212,12 @@ Client App
     "granted": true
   }
 }
+
 ```
 
 ## Permission Timeout
 
-- Nếu End User không phản hồi trong **30 giây**, Gateway tự động trả về lỗi `PERMISSION_TIMEOUT` cho Web App.
+* Nếu End User không phản hồi trong **15 giây**, hệ thống tự động đánh giá là Từ chối và trả về lỗi `CONSENT_TIMEOUT` cho Web App.
 
 ---
 
@@ -258,6 +257,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
   "type": "machine.list",
   "payload": {}
 }
+
 ```
 
 **Gateway → Web App** (response)
@@ -280,6 +280,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     }
   }
 }
+
 ```
 
 ---
@@ -297,6 +298,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     "destinationMachineId": "machine-uuid"
   }
 }
+
 ```
 
 **Client App → Gateway → Web App** (response)
@@ -318,6 +320,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     }
   }
 }
+
 ```
 
 > Application được định nghĩa là tiến trình có cửa sổ giao diện (MainWindowHandle != 0).
@@ -333,6 +336,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     "path": "C:\\Program Files\\App\\app.exe"
   }
 }
+
 ```
 
 ## application.stop
@@ -346,6 +350,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     "pid": 1234
   }
 }
+
 ```
 
 ---
@@ -361,6 +366,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
   "type": "process.list",
   "payload": {}
 }
+
 ```
 
 **Client App → Gateway → Web App** (response)
@@ -382,6 +388,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     }
   }
 }
+
 ```
 
 ## process.kill
@@ -395,6 +402,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     "pid": 1234
   }
 }
+
 ```
 
 **Client App → Gateway → Web App** (response)
@@ -407,6 +415,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     "data": {}
   }
 }
+
 ```
 
 ---
@@ -422,6 +431,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
   "type": "screen.screenshot",
   "payload": {}
 }
+
 ```
 
 **Client App → Gateway → Web App** (response)
@@ -439,6 +449,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     }
   }
 }
+
 ```
 
 > Ảnh screenshot được encode dưới dạng JPEG, base64. Chất lượng JPEG: 80%.
@@ -460,11 +471,12 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     "fps": 10
   }
 }
+
 ```
 
-| Field | Value mặc định | Mô tả                        |
-| ----- | -------------- | ---------------------------- |
-| `fps` | 10             | Số frame mỗi giây, tối đa 30 |
+| Field | Value mặc định | Mô tả |
+| --- | --- | --- |
+| `fps` | 10 | Số frame mỗi giây, tối đa 30 |
 
 **Client App → Gateway → Web App** (response xác nhận bắt đầu)
 
@@ -476,6 +488,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     "data": {}
   }
 }
+
 ```
 
 ### screen.live.frame
@@ -486,13 +499,14 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 {
   "type": "screen.live.frame",
   "payload": {
-    "image": "<base64-encoded-jpeg>",
+    "image_base64": "<base64-encoded-jpeg>",
     "width": 1920,
     "height": 1080,
     "frameIndex": 42,
     "timestamp": 1710000000
   }
 }
+
 ```
 
 > Mỗi frame là JPEG base64. Chất lượng JPEG: 60% (ưu tiên tốc độ). Kích thước tối đa mỗi frame: 512 KB sau encode.
@@ -506,6 +520,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
   "type": "screen.live.stop",
   "payload": {}
 }
+
 ```
 
 ---
@@ -525,6 +540,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     "fps": 10
   }
 }
+
 ```
 
 **Client App → Gateway → Web App** (response xác nhận bắt đầu)
@@ -537,6 +553,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     "data": {}
   }
 }
+
 ```
 
 ## webcam.frame
@@ -547,13 +564,14 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 {
   "type": "webcam.frame",
   "payload": {
-    "image": "<base64-encoded-jpeg>",
+    "image_base64": "<base64-encoded-jpeg>",
     "width": 640,
     "height": 480,
     "frameIndex": 42,
     "timestamp": 1710000000
   }
 }
+
 ```
 
 > Kích thước frame mặc định: 640×480. Chất lượng JPEG: 70%.
@@ -567,9 +585,10 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
   "type": "webcam.stop",
   "payload": {}
 }
+
 ```
 
-> Client App phải **tắt webcam indicator** ngay khi nhận được lệnh này.
+> Client App phải **tắt webcam indicator (chấm đỏ)** ngay khi nhận được lệnh này.
 
 ---
 
@@ -586,6 +605,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
   "type": "keylogger.start",
   "payload": {}
 }
+
 ```
 
 ## keylogger.stop
@@ -597,6 +617,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
   "type": "keylogger.stop",
   "payload": {}
 }
+
 ```
 
 ## keylogger.data
@@ -620,6 +641,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     "windowTitle": "Notepad"
   }
 }
+
 ```
 
 > `keylogger.data` được gửi mỗi 2 giây hoặc khi buffer đạt 50 phím, tùy điều kiện nào đến trước.
@@ -628,8 +650,8 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 
 # File Transfer Messages
 
-> Chỉ được phép thao tác trong **sandbox folder** đã cấu hình (mặc định: `C:\RemoteControl\`).
-> Mọi path nằm ngoài sandbox sẽ bị từ chối với lỗi `INVALID_PATH`.
+> Chỉ được phép thao tác trong **sandbox folder** đã cấu hình (mặc định: `C:\AgentSandbox\`).
+> Mọi nỗ lực truy cập đường dẫn tuyệt đối hoặc dùng `../` nằm ngoài sandbox sẽ bị từ chối với lỗi `INVALID_PATH`.
 
 ## file.list
 
@@ -639,9 +661,10 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 {
   "type": "file.list",
   "payload": {
-    "path": "C:\\RemoteControl\\"
+    "path": "C:\\AgentSandbox\\"
   }
 }
+
 ```
 
 **Client App → Gateway → Web App** (response)
@@ -668,6 +691,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     }
   }
 }
+
 ```
 
 ## file.download
@@ -678,9 +702,10 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 {
   "type": "file.download",
   "payload": {
-    "path": "C:\\RemoteControl\\document.pdf"
+    "path": "C:\\AgentSandbox\\document.pdf"
   }
 }
+
 ```
 
 **Client App → Gateway → Web App** (response)
@@ -698,6 +723,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     }
   }
 }
+
 ```
 
 > Kích thước file tối đa cho download: **50 MB**. Vượt quá sẽ trả về `FILE_TOO_LARGE`.
@@ -710,12 +736,13 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 {
   "type": "file.upload",
   "payload": {
-    "destinationPath": "C:\\RemoteControl\\uploaded.pdf",
+    "destinationPath": "C:\\AgentSandbox\\uploaded.pdf",
     "filename": "uploaded.pdf",
     "content": "<base64-encoded-bytes>",
     "sizeBytes": 204800
   }
 }
+
 ```
 
 **Client App → Gateway → Web App** (response)
@@ -726,10 +753,11 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
   "payload": {
     "success": true,
     "data": {
-      "savedPath": "C:\\RemoteControl\\uploaded.pdf"
+      "savedPath": "C:\\AgentSandbox\\uploaded.pdf"
     }
   }
 }
+
 ```
 
 > Kích thước file tối đa cho upload: **50 MB**.
@@ -747,6 +775,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
   "type": "power.lock",
   "payload": {}
 }
+
 ```
 
 ## power.restart
@@ -758,6 +787,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     "delaySeconds": 0
   }
 }
+
 ```
 
 ## power.shutdown
@@ -769,6 +799,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     "delaySeconds": 0
   }
 }
+
 ```
 
 ## power.sleep
@@ -778,6 +809,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
   "type": "power.sleep",
   "payload": {}
 }
+
 ```
 
 **Response chung cho tất cả Power commands** (Client App → Gateway → Web App)
@@ -790,6 +822,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
     "data": {}
   }
 }
+
 ```
 
 ---
@@ -804,11 +837,12 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
   "source": "client-app-01",
   "destination": "gateway",
   "payload": {
-    "code": "PERMISSION_DENIED",
+    "code": "USER_REJECTED",
     "message": "End user rejected the request.",
     "originalMessageId": "uuid-of-failed-request"
   }
 }
+
 ```
 
 ---
@@ -817,70 +851,73 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 
 ## Authentication & Authorization
 
-| Code                   | Mô tả                                                        |
-| ---------------------- | ------------------------------------------------------------ |
-| `AUTHENTICATION_FAILED`| Sai machineId/machineSecret hoặc token không hợp lệ          |
-| `AUTHORIZATION_FAILED` | Token hợp lệ nhưng không đủ quyền thực hiện hành động        |
+| Code | Mô tả |
+| --- | --- |
+| `AUTHENTICATION_FAILED` | Sai Token hoặc sai Machine Secret |
+| `AUTHORIZATION_FAILED` | Token hợp lệ nhưng không đủ quyền thực hiện hành động |
 
 ## Machine
 
-| Code                | Mô tả                                                   |
-| ------------------- | ------------------------------------------------------- |
-| `MACHINE_OFFLINE`   | Machine không online tại thời điểm gửi lệnh             |
-| `MACHINE_NOT_FOUND` | Không tìm thấy machineId trong registry                 |
+| Code | Mô tả |
+| --- | --- |
+| `MACHINE_OFFLINE` | Gateway không tìm thấy Client ID trong Registry |
+| `MACHINE_NOT_FOUND` | Không tìm thấy machineId trong CSDL |
 
 ## Permission
 
-| Code                  | Mô tả                                                       |
-| --------------------- | ----------------------------------------------------------- |
-| `PERMISSION_DENIED`   | End User chủ động từ chối yêu cầu                           |
-| `PERMISSION_TIMEOUT`  | End User không phản hồi trong 30 giây                       |
+| Code | Mô tả |
+| --- | --- |
+| `USER_REJECTED` | End User bấm Reject trên Popup xin quyền |
+| `CONSENT_TIMEOUT` | End User không phản hồi sau 15 giây (Auto-Reject) |
 
 ## Command
 
-| Code               | Mô tả                                                       |
-| ------------------ | ----------------------------------------------------------- |
-| `INVALID_COMMAND`  | Message type không tồn tại hoặc không được phép             |
-| `ALREADY_RUNNING`  | Chức năng (live screen / keylogger) đang chạy rồi           |
-| `NOT_RUNNING`      | Chức năng chưa được khởi động, không thể stop               |
+| Code | Mô tả |
+| --- | --- |
+| `INVALID_COMMAND` | Lệnh không tồn tại hoặc sai format JSON |
+| `ALREADY_RUNNING` | Chức năng (live screen / keylogger) đang chạy rồi |
+| `NOT_RUNNING` | Chức năng chưa được khởi động, không thể stop |
 
 ## File
 
-| Code              | Mô tả                                                       |
-| ----------------- | ----------------------------------------------------------- |
-| `INVALID_PATH`    | Đường dẫn nằm ngoài sandbox folder                         |
-| `FILE_NOT_FOUND`  | File không tồn tại tại đường dẫn chỉ định                  |
-| `FILE_TOO_LARGE`  | Kích thước file vượt quá 50 MB                              |
+| Code | Mô tả |
+| --- | --- |
+| `INVALID_PATH` | Cố ý truy cập file ngoài thư mục Sandbox |
+| `FILE_NOT_FOUND` | File không tồn tại tại đường dẫn chỉ định |
+| `FILE_TOO_LARGE` | Kích thước file vượt quá 50 MB |
 
 ## Hardware
 
-| Code                    | Mô tả                                        |
-| ----------------------- | -------------------------------------------- |
-| `WEBCAM_NOT_FOUND`      | Không tìm thấy webcam trên máy               |
-| `WEBCAM_ALREADY_IN_USE` | Webcam đang được sử dụng bởi ứng dụng khác  |
+| Code | Mô tả |
+| --- | --- |
+| `WEBCAM_NOT_FOUND` | Không tìm thấy webcam trên máy |
+| `WEBCAM_ALREADY_IN_USE` | Webcam đang được sử dụng bởi ứng dụng khác |
 
 ## System
 
-| Code             | Mô tả                                                  |
-| ---------------- | ------------------------------------------------------ |
-| `TIMEOUT`        | Client App không phản hồi trong thời gian quy định     |
-| `INTERNAL_ERROR` | Lỗi không xác định trong quá trình xử lý               |
+| Code | Mô tả |
+| --- | --- |
+| `INTERNAL_ERROR` | Lỗi xảy ra trong lúc gọi thư viện hệ thống |
 
 ---
 
 # Response Conventions
 
-- Mỗi Request phải có **đúng một Response**.
-- Response thành công: `payload.success = true`, dữ liệu trả về trong `payload.data`.
-- Response thất bại: dùng **Error Response** format với `type: "error"`.
-- Streaming (Live Screen, Webcam) là ngoại lệ: sau Response xác nhận bắt đầu, Client App tiếp tục gửi Frame events cho đến khi nhận lệnh stop.
+* Mỗi Request phải có **đúng một Response**.
+* Response thành công: `payload.success = true`, dữ liệu trả về trong `payload.data`.
+* Response thất bại: dùng **Error Response** format với `type: "error"`.
+* Streaming (Live Screen, Webcam) là ngoại lệ: sau Response xác nhận bắt đầu, Client App tiếp tục gửi Frame events cho đến khi nhận lệnh stop.
 
 ---
 
 # Related Documents
 
-- `communication_protocol.md` — Tổng quan giao thức, design rationale, message flow diagrams.
-- `security_design.md` — Authentication flow, authorization rules, JWT spec.
-- `system_architecture.md` — Kiến trúc hệ thống và trách nhiệm từng thành phần.
-- `system_specification.md` — Functional và non-functional requirements.
-- `TECH_STACK.md` — Công nghệ và thư viện sử dụng.
+* `communication_protocol.md` — Tổng quan giao thức, design rationale, message flow diagrams.
+* `security_design.md` — Authentication flow, authorization rules, JWT spec.
+* `system_architecture.md` — Kiến trúc hệ thống và trách nhiệm từng thành phần.
+* `system_specification.md` — Functional và non-functional requirements.
+* `TECH_STACK.md` — Công nghệ và thư viện sử dụng.
+
+```
+
+```
