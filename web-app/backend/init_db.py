@@ -41,8 +41,8 @@ def init_db():
         if not admin_user:
             logger.info(f"🔑 Không tìm thấy tài khoản '{default_admin_username}'. Đang khởi tạo tài khoản mặc định...")
             
-            # Mật khẩu mặc định lấy từ settings hoặc admin123
-            raw_password = getattr(settings, "FIRST_SUPERUSER_PASSWORD", "admin123")
+            # Mật khẩu mặc định lấy từ settings (config.py)
+            raw_password = settings.DEFAULT_ADMIN_PASSWORD
             
             # Băm mật khẩu bằng hàm get_password_hash từ core/security.py
             hashed_pwd = get_password_hash(raw_password)

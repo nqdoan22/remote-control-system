@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // 1. Cấu hình Axios Instance gốc
 // VITE_API_BASE_URL có thể khai báo trong file .env (VD: http://localhost:8000/api)
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
 const api = axios.create({
   baseURL: API_BASE_URL,

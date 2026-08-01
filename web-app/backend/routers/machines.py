@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 # Import công cụ CSDL và Security
 from db.database import get_db
 from db.models import Machine, User
-from schemas.machine import MachineResponse, MachineUpdateStatus
+from schemas.machine import MachineResponse, MachineUpdateStatus, MachineListResponse
 from core.security import get_current_user
 
 # Khởi tạo Logger và Router
@@ -29,7 +29,7 @@ router = APIRouter(prefix="/machines", tags=["Machine Management"])
 # =========================================================================
 # 🌟 API 1: LẤY DANH SÁCH TẤT CẢ CÁC MÁY AGENT (GET /api/v1/machines/)
 # =========================================================================
-@router.get("/", response_model=List[MachineResponse], summary="Lấy danh sách tất cả các máy Agent")
+@router.get("/", response_model=MachineListResponse, summary="Lấy danh sách tất cả các máy Agent")
 def get_all_machines(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user) # Bắt buộc phải có Token Admin mới xem được
@@ -37,9 +37,10 @@ def get_all_machines(
     """
     API phục vụ màn hình Dashboard trên Frontend:
     Mở bảng 'machines' trong CSDL và trả về danh sách toàn bộ các máy Agent đã từng kết nối.
+    Trả về theo đúng MachineListResponse Schema ({ total, machines }) mà Frontend mong đợi.
     """
     machines = db.query(Machine).order_by(Machine.last_seen.desc()).all()
-    return machines
+    return MachineListResponse(total=len(machines), machines=machines)
 
 
 # =========================================================================

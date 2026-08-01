@@ -39,6 +39,7 @@ class GatewayService(QThread):
     connected_signal = pyqtSignal()                      # Phát ra khi kết nối Gateway thành công
     disconnected_signal = pyqtSignal()                   # Phát ra khi bị rớt kết nối
     message_received_signal = pyqtSignal(dict)           # Phát ra khi nhận được tin nhắn WSMessage từ Gateway
+    metrics_signal = pyqtSignal(float, float)            # Phát ra mức tiêu thụ CPU/RAM mỗi chu kỳ Heartbeat
 
 
     def __init__(self, parent=None):
@@ -171,6 +172,9 @@ class GatewayService(QThread):
             cpu = psutil.cpu_percent(interval=None)
             ram = psutil.virtual_memory().percent
 
+            # Cập nhật chỉ số CPU/RAM lên giao diện chính
+            self.metrics_signal.emit(cpu, ram)
+
             # Đóng gói theo chuẩn WSMessage Envelope (protocol.py)
             heartbeat_msg = {
                 "messageId": str(uuid.uuid4()),
@@ -191,6 +195,7 @@ class GatewayService(QThread):
     async def _send_auth_message(self):
         """
         Gửi gói tin xác thực đăng ký ban đầu khi vừa kết nối WebSocket thành công.
+        Khớp 100% với MessageHandler._handle_auth của Gateway (role + machineId + machineSecret).
         """
         auth_msg = {
             "messageId": str(uuid.uuid4()),
@@ -199,7 +204,9 @@ class GatewayService(QThread):
             "source": settings.CLIENT_ID,
             "destination": "gateway",
             "payload": {
-                "secret": settings.CLIENT_SECRET,
+                "role": "agent",
+                "machineId": settings.CLIENT_ID,
+                "machineSecret": settings.CLIENT_SECRET,
                 "hostname": settings.HOSTNAME,
                 "ip_address": settings.IP_ADDRESS,
                 "os_info": settings.OS_INFO

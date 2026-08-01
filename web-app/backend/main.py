@@ -20,7 +20,7 @@ from init_db import init_db
 from core.gateway_client import gateway_client
 
 # Import các API Routers
-from routers import auth, machines, modules
+from routers import auth, machines, modules, ws
 
 # Thiết lập ghi Log hệ thống
 logging.basicConfig(
@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
 
     # Bước B: Mở kết nối WebSocket Client sang Gateway Server
     try:
-        await gateway_client.connect()
+        await gateway_client.start()
         logger.info("✅ [STARTUP] Đã kết nối thành công sang Gateway Server!")
     except Exception as e:
         logger.warning(f"⚠️ [STARTUP] Chưa thể kết nối Gateway ngay lúc này: {e}")
@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
 
     # Bước C: Ngắt kết nối dọn dẹp tài nguyên khi tắt Server
     logger.info("🛑 [SHUTDOWN] Đang đóng ứng dụng Backend...")
-    await gateway_client.disconnect()
+    await gateway_client.stop()
     logger.info("👋 [SHUTDOWN] Đã giải phóng hoàn toàn tài nguyên!")
 
 
@@ -94,6 +94,9 @@ app.include_router(auth.router, prefix=API_PREFIX)
 app.include_router(machines.router, prefix=API_PREFIX)
 app.include_router(modules.router, prefix=API_PREFIX)
 
+# WebSocket Endpoint (KHÔNG có prefix - bắt buộc đúng đường dẫn /ws)
+app.include_router(ws.router)
+
 
 # =========================================================================
 # 🩺 4. HEALTH CHECK ENDPOINT (KIỂM TRA SỨC KHỎE SERVER)
@@ -108,3 +111,12 @@ def root_check():
         "service": settings.PROJECT_NAME,
         "docs_url": "/docs"  # Đường dẫn tới trang Swagger UI tự động của FastAPI
     }
+
+
+# =========================================================================
+# ▶️ 5. ĐIỂM THI HÀNH CHƯƠNG TRÌNH (PROGRAM EXECUTION)
+# Cho phép chạy server bằng lệnh đơn giản: python main.py
+# =========================================================================
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

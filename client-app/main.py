@@ -21,6 +21,14 @@ from config import settings
 # Import cửa sổ chính
 from ui.main_window import MainWindow
 
+# Import Service quản lý kết nối WebSocket tới Gateway
+from core.gateway_service import GatewayService
+
+# Import Bộ điều phối lệnh (Command Dispatcher)
+# 👉 Thành phần này mới được thêm để THỰC SỰ xử lý các lệnh điều khiển từ WebAdmin
+#    (VD: start_application) thay vì trước đây chỉ log mà không làm gì.
+from core.command_dispatcher import CommandDispatcher
+
 # Thiết lập ghi log hệ thống
 logging.basicConfig(
     level=logging.INFO,
@@ -61,12 +69,44 @@ class AgentApplication:
         # Khởi tạo và hiển thị cửa sổ chính (luôn nổi trên cùng)
         self.main_window = MainWindow()
         self.main_window.show()
-        
-        # TODO: Trong các bước tiếp theo, chúng ta sẽ kết nối GatewayService
-        # và PermissionManager tại đây qua cơ chế Signal/Slot của PyQt6.
-        
+
+        # Khởi chạy GatewayService chạy trên một QThread riêng
+        # để quản lý kết nối WebSocket với Gateway Server (Online/Offline).
+        self.gateway_service = GatewayService()
+        self.gateway_service.connected_signal.connect(
+            lambda: self.main_window.update_connection_status(True)
+        )
+        self.gateway_service.disconnected_signal.connect(
+            lambda: self.main_window.update_connection_status(False)
+        )
+        self.gateway_service.metrics_signal.connect(self.main_window.update_metrics)
+        self.gateway_service.message_received_signal.connect(self._handle_gateway_message)
+        self.gateway_service.start()
+
+        # Khởi tạo Command Dispatcher để xử lý các lệnh điều khiển từ WebAdmin
+        self.command_dispatcher = CommandDispatcher(self.gateway_service, self.main_window)
+
         # Chạy Event Loop chính của PyQt6
-        sys.exit(self.app.exec())
+        exit_code = self.app.exec()
+
+        # Dọn dẹp Thread mạng trước khi thoát ứng dụng
+        self.gateway_service.stop()
+        self.gateway_service.wait(3000)
+        sys.exit(exit_code)
+
+    def _handle_gateway_message(self, message: dict):
+        """
+        Xử lý các gói tin Gateway gửi tới:
+          - Ghi log công khai cho End User theo dõi.
+          - 👉 QUAN TRỌNG: Chuyển lệnh cho CommandDispatcher thực thi
+            (trước đây chỉ log, nên lệnh "Khởi chạy App" bị nuốt lặng im).
+        """
+        msg_type = message.get("type", "unknown")
+        logger.info(f"[GATEWAY MESSAGE] type='{msg_type}'")
+        self.main_window.append_log(f"Nhận tin từ Gateway: {msg_type}")
+
+        # Bàn giao cho CommandDispatcher phân loại & thực thi lệnh
+        self.command_dispatcher.dispatch(message)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,29 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { getMachineDetailApi } from '../services/api';
 // 2. Import Custom Hook WebSocket để điều khiển Real-time
 import { useWebSocket } from '../hooks/useWebSocket';
+// 3. Import định nghĩa chuẩn 8 Module (danh sách Tab theo API Contract)
+import { MODULE_TABS } from '../components/shared/ModulePanel';
+// 4. Import 8 Component Module chức năng điều khiển máy Client
+import Applications from '../components/modules/Applications';
+import Processes from '../components/modules/Processes';
+import Screenshot from '../components/modules/Screenshot';
+import LiveScreen from '../components/modules/LiveScreen';
+import KeyLogger from '../components/modules/KeyLogger';
+import FileTransfer from '../components/modules/FileTransfer';
+import Webcam from '../components/modules/Webcam';
+import PowerControl from '../components/modules/PowerControl';
+
+// Map 8 tab id -> Component Module tương ứng
+const MODULE_COMPONENTS = {
+  applications: Applications,
+  processes: Processes,
+  screenshot: Screenshot,
+  livescreen: LiveScreen,
+  keylogger: KeyLogger,
+  filemanager: FileTransfer,
+  webcam: Webcam,
+  power: PowerControl,
+};
 
 const MachinePage = () => {
   // Lấy machineId từ URL (ví dụ: /machine/client-app-01 -> machineId = 'client-app-01')
@@ -16,23 +39,14 @@ const MachinePage = () => {
   const [machineInfo, setMachineInfo] = useState(null); // Thông tin chi tiết máy
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  
-  // Quản lý Tab đang mở ('info', 'processes', 'terminal', 'system')
-  const [activeTab, setActiveTab] = useState('info');
 
-  // State cho Module Tiến Trình (Process Manager)
-  const [processes, setProcesses] = useState([]);
-
-  // State cho Module Terminal (Dòng lệnh CMD/PowerShell)
-  const [commandInput, setCommandInput] = useState('');
-  const [terminalLogs, setTerminalLogs] = useState([
-    '--- BẮT ĐẦU PHIÊN LÀM VIỆC TERMINAL ---'
-  ]);
+  // Tab Module đang mở (Mặc định mở Module 'applications' - Module đầu tiên trong 8 Module)
+  const [activeTab, setActiveTab] = useState('applications');
 
   // =========================================================================
   // 🔌 KHỞI TẠO WEBSOCKET CONNECTION TỚI MÁY CLIENT
   // =========================================================================
-  const { isConnected, lastMessage, sendMessage } = useWebSocket(machineId);
+  const { isConnected, connecting, reconnecting, lastMessage, sendMessage } = useWebSocket(machineId);
 
   // =========================================================================
   // 🚀 REST API: Lấy thông tin cơ bản của máy khi mới mở trang
@@ -56,250 +70,146 @@ const MachinePage = () => {
   }, [machineId]);
 
   // =========================================================================
-  // ⚡ EVENT-DRIVEN: Lắng nghe phản hồi thời gian thực từ WebSocket (lastMessage)
+  // ⚡ XỬ LÝ CẢNH BÁO TOÀN CỤC TỪ AGENT (không thuộc riêng Module nào)
   // =========================================================================
   useEffect(() => {
-    if (!lastMessage) return;
-
-    console.log('📩 Nhận dữ liệu WS mới:', lastMessage);
-
-    /*
-      Xử lý dữ liệu trả về dựa theo WSMessage Schema (type):
-      - 'process.list.response': Trả về danh sách tiến trình đang chạy
-      - 'terminal.output': Trả về kết quả thực thi lệnh Terminal
-      - 'system.alert': Trả về thông báo từ Agent
-    */
-    switch (lastMessage.type) {
-      case 'process.list.response':
-        // Cập nhật mảng tiến trình thu được từ Agent
-        if (lastMessage.payload?.processes) {
-          setProcesses(lastMessage.payload.processes);
-        }
-        break;
-
-      case 'terminal.output':
-        // Nối kết quả câu lệnh mới vào khung hiển thị Terminal
-        if (lastMessage.payload?.output) {
-          setTerminalLogs((prev) => [...prev, lastMessage.payload.output]);
-        }
-        break;
-
-      case 'system.alert':
-        alert(`[CẢNH BÁO TỪ AGENT]: ${lastMessage.payload?.message}`);
-        break;
-
-      default:
-        break;
+    if (lastMessage?.type === 'system.alert') {
+      alert(`[CẢNH BÁO TỪ AGENT]: ${lastMessage.payload?.message}`);
     }
   }, [lastMessage]);
 
   // =========================================================================
-  // 🛠️ HÀM TƯƠNG TÁC GỬI LỆNH QUA WEBSOCKET (sendMessage)
+  // 🔄 ADAPTER GỬI LỆNH: Các Module Component gọi onSendMessage({action, payload})
+  // Nhưng Hook useWebSocket chỉ nhận sendMessage(type, payload).
+  // -> Chuyển đổi cú pháp message của Module về dạng Envelope WSMessage chuẩn.
   // =========================================================================
-
-  // 1. Yêu cầu Agent gửi danh sách Tiến trình (Process)
-  const handleRefreshProcesses = () => {
-    if (!isConnected) return alert('Chưa kết nối WebSocket!');
-    sendMessage('process.list', {});
+  const handleModuleMessage = (msg) => {
+    sendMessage(msg.action, msg.payload || {});
   };
 
-  // 2. Yêu cầu Agent diệt 1 Tiến trình theo PID
-  const handleKillProcess = (pid) => {
-    if (!window.confirm(`Bạn có chắc muốn diệt tiến trình PID: ${pid}?`)) return;
-    sendMessage('process.kill', { pid });
-    // Sau khi bắn lệnh diệt, yêu cầu gửi lại danh sách mới
-    setTimeout(handleRefreshProcesses, 500);
-  };
+  // =========================================================================
+  // 🔁 NORMALIZE lastMessage: Gateway/Client gửi dữ liệu qua trường `type`,
+  // nhưng các Module Component đọc trường `action`, `status`, `message` & `data`.
+  // -> Bổ sung các trường này (lấy từ payload của Envelope) để 2 chuẩn hoạt động chung.
+  // =========================================================================
+  const moduleLastMessage = lastMessage
+    ? {
+        ...lastMessage,
+        action: lastMessage.action || lastMessage.type,
+        // data: ưu tiên trường data trong payload (VD: danh sách app/process),
+        // nếu không có thì fallback về toàn bộ payload.
+        data: lastMessage.data ?? lastMessage.payload?.data ?? lastMessage.payload,
+        // status / message thường được đóng gói TRONG payload (không nằm ngoài envelope)
+        status: lastMessage.status ?? lastMessage.payload?.status,
+        message: lastMessage.message ?? lastMessage.payload?.message,
+      }
+    : lastMessage;
 
-  // 3. Gửi lệnh Shell/CMD sang Agent
-  const handleSendTerminalCommand = (e) => {
-    e.preventDefault();
-    if (!commandInput.trim() || !isConnected) return;
+  // =========================================================================
+  // 🖥️ CHUẨN HÓA selectedMachine: Các Module Component yêu cầu object có
+  // { machineId, hostname, ipAddress, status } từ REST MachineResponse.
+  // =========================================================================
+  const selectedMachine = machineInfo
+    ? {
+        machineId: machineInfo.machine_id || machineId,
+        hostname: machineInfo.hostname,
+        ipAddress: machineInfo.ip_address,
+        status: isConnected ? 'online' : 'offline',
+      }
+    : null;
 
-    // Hiển thị ngay lệnh Admin vừa gõ vào khung log
-    setTerminalLogs((prev) => [...prev, `> ${commandInput}`]);
-
-    // Gửi lệnh qua WebSocket
-    sendMessage('terminal.command', { command: commandInput });
-
-    // Clear ô nhập liệu
-    setCommandInput('');
-  };
-
-  // 4. Lệnh Hệ thống (Shutdown / Lock / Reboot)
-  const handleSystemAction = (actionType) => {
-    if (!window.confirm(`XÁC NHẬN: Bạn muốn thực hiện thao tác "${actionType}"?`)) return;
-    sendMessage('system.action', { action: actionType });
-  };
+  // Component Module đang được chọn theo Tab
+  const ActiveModuleComponent = MODULE_COMPONENTS[activeTab];
 
   if (loading) return <div style={styles.container}>Đang tải thông tin máy...</div>;
   if (error) return <div style={styles.container}>{error}</div>;
 
   return (
     <div style={styles.container}>
-      {/* 1. HEADER & TRẠNG THÁI KẾT NỐI REAL-TIME */}
+      {/* 1. HEADER & TRẠNG THÁI KẾT NỐI REAL-TIME + THÔNG TIN MÁY */}
       <header style={styles.header}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           <button onClick={() => navigate('/dashboard')} style={styles.backBtn}>
             &larr; Quay lại
           </button>
           <h1 style={styles.title}>
             Máy: {machineInfo?.hostname || machineId}
           </h1>
+          <span style={styles.infoChip}>IP: {machineInfo?.ip_address || 'N/A'}</span>
+          <span style={styles.infoChip}>OS: {machineInfo?.os_info || 'N/A'}</span>
+          <span style={styles.infoChip}>MAC: {machineInfo?.mac_address || 'N/A'}</span>
         </div>
 
         {/* Badge hiển thị trạng thái đường ống WebSocket */}
+        {/* 🔧 ĐÃ CẬP NHẬT: Phân biệt 3 trạng thái 'READY' / 'ĐANG KẾT NỐI' / 'MẤT KẾT NỐI' để
+            Admin không bị hiểu lầm khi hook đang tự động reconnect. */}
         <div style={styles.wsStatusBadge}>
           <span
             style={{
               ...styles.statusDot,
-              backgroundColor: isConnected ? '#22c55e' : '#ef4444',
+              backgroundColor: isConnected
+                ? '#22c55e'
+                : connecting || reconnecting
+                  ? '#f59e0b'
+                  : '#ef4444',
             }}
           />
-          <span style={{ color: isConnected ? '#22c55e' : '#ef4444', fontWeight: 'bold' }}>
-            {isConnected ? 'WEBSOCKET REALTIME: READY' : 'MẤT KẾT NỐI WEBSOCKET'}
+          <span
+            style={{
+              color: isConnected ? '#22c55e' : connecting || reconnecting ? '#f59e0b' : '#ef4444',
+              fontWeight: 'bold',
+            }}
+          >
+            {isConnected
+              ? 'WEBSOCKET REALTIME: READY'
+              : reconnecting
+                ? 'MẤT KẾT NỐI - ĐANG KẾT NỐI LẠI...'
+                : connecting
+                  ? 'ĐANG KẾT NỐI WEBSOCKET...'
+                  : 'MẤT KẾT NỐI WEBSOCKET'}
           </span>
         </div>
       </header>
 
-      {/* 2. THANH CHỌN TAB NĂNG LỰC ĐIỀU KHIỂN */}
+      {/* 2. THANH CHỌN TAB THEO ĐÚNG 8 MODULE CHỨC NĂNG */}
       <div style={styles.tabBar}>
-        <button
-          style={activeTab === 'info' ? styles.activeTabBtn : styles.tabBtn}
-          onClick={() => setActiveTab('info')}
-        >
-          Thông Tin Máy
-        </button>
-        <button
-          style={activeTab === 'processes' ? styles.activeTabBtn : styles.tabBtn}
-          onClick={() => {
-            setActiveTab('processes');
-            handleRefreshProcesses(); // Mở tab là tự load danh sách tiến trình
-          }}
-        >
-          Quản Lý Tiến Trình (Process)
-        </button>
-        <button
-          style={activeTab === 'terminal' ? styles.activeTabBtn : styles.tabBtn}
-          onClick={() => setActiveTab('terminal')}
-        >
-          Remote Terminal (CMD)
-        </button>
-        <button
-          style={activeTab === 'system' ? styles.activeTabBtn : styles.tabBtn}
-          onClick={() => setActiveTab('system')}
-        >
-          Lệnh Hệ Thống
-        </button>
+        {MODULE_TABS.map((tab) => {
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              style={isActive ? styles.activeTabBtn : styles.tabBtn}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              <span style={{ marginRight: '6px' }}>{tab.icon}</span>
+              {tab.label}
+
+              {/* Badge chỉ báo các chức năng nhạy cảm phải xin quyền người dùng Client */}
+              {tab.sensitive && (
+                <span
+                  title="Chức năng nhạy cảm - Bắt buộc xin phép người dùng Client"
+                  style={styles.sensitiveBadge}
+                >
+                  🔒 Consent
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
-      {/* 3. NỘI DUNG TỪNG TAB */}
+      {/* 3. NỘI DUNG MODULE ĐANG ĐƯỢC CHỌN */}
       <div style={styles.contentArea}>
-        {/* TAB 1: THÔNG TIN PHẦN CỨNG & HỆ ĐIỀU HÀNH */}
-        {activeTab === 'info' && (
+        {ActiveModuleComponent && selectedMachine ? (
+          <ActiveModuleComponent
+            selectedMachine={selectedMachine}
+            onSendMessage={handleModuleMessage}
+            lastMessage={moduleLastMessage}
+          />
+        ) : (
           <div style={styles.card}>
-            <h3>Thông tin Tổng quan</h3>
-            <p><strong>Machine ID:</strong> {machineInfo?.machine_id}</p>
-            <p><strong>Hostname:</strong> {machineInfo?.hostname}</p>
-            <p><strong>IP Address:</strong> {machineInfo?.ip_address}</p>
-            <p><strong>Mac Address:</strong> {machineInfo?.mac_address || 'N/A'}</p>
-            <p><strong>Hệ điều hành:</strong> {machineInfo?.os_info || 'Windows/Linux'}</p>
-          </div>
-        )}
-
-        {/* TAB 2: QUẢN LÝ TIẾN TRÌNH (PROCESS MANAGER) */}
-        {activeTab === 'processes' && (
-          <div style={styles.card}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
-              <h3>Danh Sách Tiến Trình Đang Chạy</h3>
-              <button onClick={handleRefreshProcesses} style={styles.actionBtn}>
-                Làm mới (Refresh)
-              </button>
-            </div>
-            <table style={styles.table}>
-              <thead>
-                <tr style={styles.thRow}>
-                  <th style={styles.th}>PID</th>
-                  <th style={styles.th}>Tên Tiến Trình</th>
-                  <th style={styles.th}>Sử dụng CPU</th>
-                  <th style={styles.th}>Sử dụng RAM</th>
-                  <th style={styles.th}>Thao tác</th>
-                </tr>
-              </thead>
-              <tbody>
-                {processes.length === 0 ? (
-                  <tr>
-                    <td colSpan="5" style={{ ...styles.td, textAlign: 'center' }}>
-                      Bấm "Làm mới" hoặc chờ dữ liệu từ Agent gửi về...
-                    </td>
-                  </tr>
-                ) : (
-                  processes.map((proc) => (
-                    <tr key={proc.pid} style={styles.tr}>
-                      <td style={styles.td}>{proc.pid}</td>
-                      <td style={styles.td}><strong>{proc.name}</strong></td>
-                      <td style={styles.td}>{proc.cpu_usage || 0}%</td>
-                      <td style={styles.td}>{proc.memory_usage || 0} MB</td>
-                      <td style={styles.td}>
-                        <button
-                          onClick={() => handleKillProcess(proc.pid)}
-                          style={styles.dangerBtn}
-                        >
-                          Kill Task
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* TAB 3: REMOTE TERMINAL / CMD */}
-        {activeTab === 'terminal' && (
-          <div style={styles.card}>
-            <h3>Điều khiển Dòng lệnh Từ xa (Remote Shell)</h3>
-            {/* Khung log giống màn hình Console */}
-            <div style={styles.terminalConsole}>
-              {terminalLogs.map((log, index) => (
-                <div key={index} style={styles.terminalLine}>{log}</div>
-              ))}
-            </div>
-
-            {/* Form gõ lệnh */}
-            <form onSubmit={handleSendTerminalCommand} style={styles.terminalForm}>
-              <span style={{ color: '#22c55e', fontWeight: 'bold' }}>&gt;</span>
-              <input
-                type="text"
-                placeholder="Nhập lệnh CMD/PowerShell (ví dụ: dir, ipconfig, whoami)..."
-                value={commandInput}
-                onChange={(e) => setCommandInput(e.target.value)}
-                style={styles.terminalInput}
-                disabled={!isConnected}
-              />
-              <button type="submit" style={styles.actionBtn} disabled={!isConnected}>
-                Gửi Lệnh
-              </button>
-            </form>
-          </div>
-        )}
-
-        {/* TAB 4: LỆNH HỆ THỐNG */}
-        {activeTab === 'system' && (
-          <div style={styles.card}>
-            <h3>Lệnh Điều Khiển Nhanh Hệ Thống</h3>
-            <div style={{ display: 'flex', gap: '16px', marginTop: '20px' }}>
-              <button onClick={() => handleSystemAction('lock')} style={styles.warnBtn}>
-                Khóa Màn Hình Client
-              </button>
-              <button onClick={() => handleSystemAction('reboot')} style={styles.warnBtn}>
-                Khởi Động Lại Máy
-              </button>
-              <button onClick={() => handleSystemAction('shutdown')} style={styles.dangerBtn}>
-                Tắt Máy Ngay Lập Tức
-              </button>
-            </div>
+            <h3>Chưa có thông tin máy</h3>
+            <p>Không thể hiển thị các Module điều khiển. Vui lòng thử lại.</p>
           </div>
         )}
       </div>
@@ -312,28 +222,18 @@ const MachinePage = () => {
 // =========================================================================
 const styles = {
   container: { padding: '24px', backgroundColor: '#0f172a', minHeight: '100vh', color: '#f8fafc', fontFamily: 'Segoe UI, sans-serif' },
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '20px' },
   backBtn: { backgroundColor: '#334155', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer' },
   title: { fontSize: '22px', color: '#38bdf8', margin: 0 },
+  infoChip: { backgroundColor: '#1e293b', border: '1px solid #334155', color: '#cbd5e1', padding: '4px 10px', borderRadius: '14px', fontSize: '0.8rem' },
   wsStatusBadge: { display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#1e293b', padding: '8px 16px', borderRadius: '20px', border: '1px solid #334155' },
   statusDot: { width: '10px', height: '10px', borderRadius: '50%' },
-  tabBar: { display: 'flex', gap: '8px', borderBottom: '1px solid #334155', marginBottom: '20px' },
-  tabBtn: { padding: '10px 16px', backgroundColor: 'transparent', color: '#94a3b8', border: 'none', cursor: 'pointer', borderBottom: '2px solid transparent' },
-  activeTabBtn: { padding: '10px 16px', backgroundColor: 'transparent', color: '#38bdf8', border: 'none', cursor: 'pointer', borderBottom: '2px solid #38bdf8', fontWeight: 'bold' },
+  tabBar: { display: 'flex', gap: '8px', borderBottom: '1px solid #334155', marginBottom: '20px', overflowX: 'auto', flexWrap: 'nowrap' },
+  tabBtn: { padding: '10px 16px', backgroundColor: 'transparent', color: '#94a3b8', border: 'none', cursor: 'pointer', borderBottom: '2px solid transparent', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center' },
+  activeTabBtn: { padding: '10px 16px', backgroundColor: 'transparent', color: '#38bdf8', border: 'none', cursor: 'pointer', borderBottom: '2px solid #38bdf8', fontWeight: 'bold', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center' },
+  sensitiveBadge: { fontSize: '0.65rem', backgroundColor: '#334155', color: '#fbbf24', padding: '2px 4px', borderRadius: '3px', marginLeft: '6px', border: '1px solid #d97706' },
   contentArea: { marginTop: '10px' },
   card: { backgroundColor: '#1e293b', padding: '20px', borderRadius: '8px', border: '1px solid #334155' },
-  table: { width: '100%', borderCollapse: 'collapse', textAlign: 'left' },
-  thRow: { borderBottom: '2px solid #334155' },
-  th: { padding: '10px', color: '#94a3b8', fontSize: '14px' },
-  tr: { borderBottom: '1px solid #334155' },
-  td: { padding: '10px', fontSize: '14px' },
-  actionBtn: { backgroundColor: '#0284c7', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '4px', cursor: 'pointer' },
-  dangerBtn: { backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '4px', cursor: 'pointer' },
-  warnBtn: { backgroundColor: '#d97706', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '4px', cursor: 'pointer' },
-  terminalConsole: { backgroundColor: '#020617', padding: '16px', borderRadius: '6px', height: '300px', overflowY: 'auto', fontFamily: 'Courier New, monospace', fontSize: '14px', border: '1px solid #334155', marginBottom: '12px' },
-  terminalLine: { marginBottom: '4px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' },
-  terminalForm: { display: 'flex', alignItems: 'center', gap: '8px' },
-  terminalInput: { flex: 1, backgroundColor: '#020617', border: '1px solid #334155', color: '#22c55e', padding: '10px', borderRadius: '4px', fontFamily: 'Courier New, monospace', outline: 'none' },
 };
 
 export default MachinePage;

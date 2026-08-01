@@ -1,7 +1,7 @@
 import React from 'react';
 
 // Danh sách định nghĩa 8 Module chức năng theo chuẩn thiết kế API Contract
-const MODULE_TABS = [
+export const MODULE_TABS = [
   { id: 'applications', label: 'Applications', icon: '📱', sensitive: false },
   { id: 'processes', label: 'Processes', icon: '⚙️', sensitive: false },
   { id: 'screenshot', label: 'Screenshot', icon: '📸', sensitive: true },

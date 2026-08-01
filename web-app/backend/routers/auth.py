@@ -72,7 +72,8 @@ def login(
 
     # 5. Tạo JWT Access Token chứa thông tin username và role
     access_token = create_access_token(
-        data={"sub": user.username, "role": user.role},
+        subject=user.username,
+        role=user.role,
         expires_delta=access_token_expires
     )
 

@@ -66,8 +66,8 @@ class ClientSettings(BaseSettings):
         description="Mã định danh duy nhất (machine_id) của Agent trong hệ thống."
     )
     CLIENT_SECRET: str = Field(
-        default="agent_secret_key_change_me_in_prod",
-        description="Mật khẩu bí mật để xác thực khi đăng ký với Gateway/Backend."
+        default="DEFAULT_SECRET_KEY_123",
+        description="Mật khẩu bí mật để xác thực khi đăng ký với Gateway/Backend. Phải khớp với AGENT_SECRET_KEY của Gateway."
     )
     HOSTNAME: str = Field(
         default_factory=socket.gethostname,

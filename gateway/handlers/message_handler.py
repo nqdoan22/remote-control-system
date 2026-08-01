@@ -181,11 +181,18 @@ class MessageHandler:
             await websocket.send(response.model_dump_json())
 
             # Báo tin cho tất cả Admin WebApp biết Agent vừa Online
+            # (kèm thông tin hostname/ip/os để Backend ghi nhận vào CSDL)
             online_event = WSMessage(
                 type="agent.status",
                 source="gateway",
                 destination="webapp",
-                payload={"machineId": machine_id, "status": "online"}
+                payload={
+                    "machineId": machine_id,
+                    "status": "online",
+                    "hostname": payload.get("hostname"),
+                    "ip_address": payload.get("ip_address"),
+                    "os_info": payload.get("os_info")
+                }
             )
             await manager.broadcast_to_webapps(online_event.model_dump_json())
 

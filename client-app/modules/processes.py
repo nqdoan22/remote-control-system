@@ -29,6 +29,7 @@ def list_processes() -> List[Dict[str, Any]]:
             "username": str,
             "cpu_percent": float,
             "memory_percent": float,
+            "memory_mb": float,
             "status": str
         }
     """
@@ -44,6 +45,13 @@ def list_processes() -> List[Dict[str, Any]]:
             # Làm tròn các chỉ số phần trăm để dữ liệu JSON gọn nhẹ hơn
             cpu_usage = round(pinfo.get('cpu_percent') or 0.0, 1)
             mem_usage = round(pinfo.get('memory_percent') or 0.0, 1)
+
+            # Tính dung lượng RAM thực tế (MB) từ RSS để Frontend Processes.jsx
+            # hiển thị cột "RAM Usage (MB)" (Frontend đọc field `memory_mb`).
+            try:
+                mem_mb = round(proc.memory_info().rss / (1024 * 1024), 1)
+            except Exception:
+                mem_mb = 0.0
             
             process_list.append({
                 "pid": pinfo['pid'],
@@ -51,6 +59,7 @@ def list_processes() -> List[Dict[str, Any]]:
                 "username": pinfo.get('username') or "N/A",
                 "cpu_percent": cpu_usage,
                 "memory_percent": mem_usage,
+                "memory_mb": mem_mb,
                 "status": pinfo.get('status') or "unknown"
             })
 
