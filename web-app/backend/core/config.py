@@ -53,7 +53,9 @@ class Settings(BaseSettings):
     # Ref: schemas/protocol.py (WSMessage)
     # -------------------------------------------------------------------------
     # Địa chỉ WebSocket của Gateway Server mà Backend sẽ kết nối tới
-    GATEWAY_WS_URL: str = "ws://localhost:8765"
+    # (phải kèm path '/webapp' — khớp route trong gateway/main.py, nếu không Gateway
+    # sẽ đóng kết nối với close code 4004 "Unknown path")
+    GATEWAY_WS_URL: str = "ws://localhost:8765/webapp"
     
     # Định danh duy nhất đại diện cho Web App Backend khi đóng gói WSMessage (source = "webapp")
     BACKEND_SOURCE_ID: str = "webapp"

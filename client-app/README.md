@@ -43,7 +43,7 @@ Client App đọc cấu hình từ [config.py](config.py) và file `.env` trong 
 Ví dụ:
 
 ```env
-GATEWAY_WS_URL=ws://127.0.0.1:8765/ws/client
+GATEWAY_WS_URL=ws://127.0.0.1:8765/client
 RECONNECT_INTERVAL_SECONDS=5
 HEARTBEAT_INTERVAL_SECONDS=5
 CLIENT_ID=client-my-pc
@@ -60,7 +60,7 @@ Lưu ý:
 
 - `CLIENT_SECRET` phải khớp với secret đã đăng ký ở Gateway.
 - `SANDBOX_DIR` là thư mục an toàn cho thao tác file.
-- `GATEWAY_WS_URL` cần khớp với endpoint WebSocket thực tế của Gateway.
+- `GATEWAY_WS_URL` cần khớp với endpoint WebSocket thực tế của Gateway — Gateway chỉ lắng nghe path `/client` cho Client App (xem `gateway/main.py`), không phải `/ws/client`.
 
 ## Cài đặt
 
@@ -80,26 +80,27 @@ Nếu dùng PowerShell thì kích hoạt bằng:
 
 ### Cài package
 
-File `requirements.txt` hiện đang trống, nên cài các package được dùng trực tiếp trong mã nguồn:
-
-```bash
-pip install PyQt6 websockets psutil pynput mss Pillow opencv-python pydantic pydantic-settings
-```
-
-Nếu sau này `requirements.txt` được cập nhật, có thể dùng:
-
 ```bash
 pip install -r requirements.txt
 ```
 
 ## Chạy ứng dụng
 
+**Điều kiện tiên quyết:** Gateway phải đang chạy trước (xem `gateway/README.md`), vì Client App tự kết nối ra ngoài (outbound) tới `GATEWAY_WS_URL` ngay khi khởi động — không tự khởi động Gateway giúp bạn.
+
+1. Đảm bảo `GATEWAY_WS_URL` trong `.env` (hoặc mặc định `ws://127.0.0.1:8765/client`) trỏ đúng địa chỉ Gateway đang chạy.
+2. Nếu Gateway giới hạn danh sách machine (`REGISTERED_MACHINES` trong `gateway/.env`), đảm bảo `CLIENT_ID`/`CLIENT_SECRET` của Client App khớp với một entry đã đăng ký, nếu không sẽ bị Gateway từ chối `AUTHENTICATION_FAILED`.
+3. Chạy ứng dụng:
+
 ```bash
 cd client-app
+.\.venv\Scripts\activate   # nếu dùng virtualenv
 python main.py
 ```
 
-Ứng dụng sẽ mở cửa sổ chính, tự kết nối tới Gateway và tiếp tục chạy trong system tray.
+Ứng dụng sẽ mở cửa sổ chính, tự kết nối tới Gateway và tiếp tục chạy trong system tray (đóng cửa sổ không thoát ứng dụng — dùng icon khay hệ thống hoặc Ctrl+C ở terminal để thoát hẳn).
+
+> **Chạy với quyền Administrator** nếu cần test các chức năng như `power.shutdown`/`power.restart`, hoặc đóng (kill) các tiến trình chạy với quyền cao hơn — nếu không, các lệnh này có thể trả lỗi `INTERNAL_ERROR`/`AccessDenied`.
 
 ## Luồng hoạt động
 

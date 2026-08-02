@@ -72,7 +72,7 @@ File `backend/core/config.py` đọc biến từ `.env`. Các biến thường d
 ```env
 SECRET_KEY=replace-me
 DATABASE_URL=sqlite:///./sql_app.db
-GATEWAY_WS_URL=ws://localhost:8765
+GATEWAY_WS_URL=ws://localhost:8765/webapp
 ACCESS_TOKEN_EXPIRE_MINUTES=1440
 DEFAULT_ADMIN_USERNAME=admin
 DEFAULT_ADMIN_PASSWORD=AdminPass123!

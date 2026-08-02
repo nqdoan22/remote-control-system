@@ -39,27 +39,31 @@ Mọi chức năng **không có trong bảng trên** đều không yêu cầu x�
 
 # System Messages & Heartbeat
 
-| Parameter             | Value  | Mô tả                                                       |
-| --------------------- | ------ | ----------------------------------------------------------- |
-| `HEARTBEAT_INTERVAL`  | 5s     | Client App gửi heartbeat mỗi 5 giây                         |
-| `HEARTBEAT_TIMEOUT`   | 15s    | Nếu rớt heartbeat 3 lần liên tiếp (15s) → đánh dấu Offline  |
-| `RECONNECT_INTERVAL`  | 5s     | Client App thử kết nối lại sau mỗi 5 giây                   |
-| `RECONNECT_MAX_RETRY` | ∞      | Client App thử kết nối lại vô thời hạn                      |
+| Parameter                  | Value (mặc định) | Mô tả                                                                 |
+| -------------------------- | ----------------- | ---------------------------------------------------------------------- |
+| `HEARTBEAT_INTERVAL`       | 5s                 | Client App gửi heartbeat mỗi 5 giây (`config.py::HEARTBEAT_INTERVAL_SECONDS`). |
+| `HEARTBEAT_TIMEOUT`        | 45s                | Nếu Gateway không nhận được heartbeat trong 45s → đánh dấu Offline (`gateway/config.py::HEARTBEAT_TIMEOUT`, cấu hình qua `.env`). |
+| `HEARTBEAT_CHECK_INTERVAL` | 5s                 | Chu kỳ Gateway quét các machine hết hạn heartbeat (background task).  |
+| `RECONNECT_INTERVAL`       | 5s                 | Client App thử kết nối lại sau mỗi 5 giây.                            |
+| `RECONNECT_MAX_RETRY`      | ∞                  | Client App thử kết nối lại vô thời hạn.                               |
 
-### system.heartbeat
+> `HEARTBEAT_TIMEOUT` là giá trị cấu hình được ở Gateway (`.env`); 45s là mặc định hiện tại, có thể chỉnh về ngưỡng thấp hơn (VD: 15s ~ 3 lần rớt heartbeat) tùy độ ổn định mạng LAN thực tế.
 
-**Client App → Gateway**
+### heartbeat
+
+**Client App → Gateway** *(xử lý tại Gateway, không forward xuống Web App)*
 
 ```json
 {
   "messageId": "uuid",
-  "type": "system.heartbeat",
+  "type": "heartbeat",
   "timestamp": 1710000000,
   "source": "client-app-01",
   "destination": "gateway",
   "payload": {
     "status": "online",
-    "cpu_usage": 15.2
+    "cpu_usage": 15.2,
+    "ram_usage": 42.7
   }
 }
 
@@ -69,19 +73,31 @@ Mọi chức năng **không có trong bảng trên** đều không yêu cầu x�
 
 # Authentication Messages
 
+Gateway mở **hai WebSocket endpoint riêng biệt** — mỗi loại kết nối phải nối đúng path của mình, không dùng chung một URL:
+
+| Endpoint            | Dành cho    | Type message đầu tiên bắt buộc |
+| ------------------- | ----------- | ------------------------------- |
+| `ws://<host>:8765/client` | Client App  | `auth.client`                   |
+| `ws://<host>:8765/webapp` | Web App     | `auth.webapp`                   |
+
+Kết nối tới path khác sẽ bị Gateway đóng ngay với close code `4004`. Nếu message đầu tiên không đúng type mong đợi, hoặc không gửi trong vòng 10 giây (`AUTH_TIMEOUT`), Gateway trả `error AUTHENTICATION_FAILED` rồi đóng kết nối với close code `4001`.
+
 ## Client App Authentication
 
-**Client App → Gateway** (ngay sau khi kết nối WebSocket)
+**Client App → Gateway** (ngay sau khi kết nối WebSocket tới `/client`)
 
 ```json
 {
   "messageId": "uuid",
-  "type": "system.auth",
+  "type": "auth.client",
   "timestamp": 1710000000,
   "source": "client-app-01",
   "destination": "gateway",
   "payload": {
-    "machineSecret": "d8e8fca2dc0f896fd7cb4cb0031ba249"
+    "machineId": "client-app-01",
+    "machineSecret": "d8e8fca2dc0f896fd7cb4cb0031ba249",
+    "hostname": "DESKTOP-ABC123",
+    "ipAddress": "192.168.1.100"
   }
 }
 
@@ -98,24 +114,24 @@ Mọi chức năng **không có trong bảng trên** đều không yêu cầu x�
   "destination": "client-app-01",
   "payload": {
     "success": true,
-    "data": {
-      "sessionToken": "jwt-token-string"
-    }
+    "data": {}
   }
 }
 
 ```
 
+> `machineId`/`machineSecret` được đối chiếu với danh sách `REGISTERED_MACHINES` cấu hình tại Gateway (`.env`). Sai thông tin → `error AUTHENTICATION_FAILED` + đóng kết nối. Sau nhiều lần đăng nhập sai liên tiếp từ cùng một IP, Gateway tạm khóa IP đó (`AUTH_MAX_ATTEMPTS` / `AUTH_LOCKOUT_SECONDS`).
+
 ---
 
 ## Web App Authentication
 
-**Web App → Gateway** (ngay sau khi kết nối WebSocket)
+**Web App → Gateway** (ngay sau khi kết nối WebSocket tới `/webapp`)
 
 ```json
 {
   "messageId": "uuid",
-  "type": "system.auth",
+  "type": "auth.webapp",
   "timestamp": 1710000000,
   "source": "webapp",
   "destination": "gateway",
@@ -142,6 +158,8 @@ Mọi chức năng **không có trong bảng trên** đều không yêu cầu x�
 }
 
 ```
+
+> Token được xác thực bằng `JWT_SECRET` cấu hình tại Gateway (`.env`), phải khớp với secret dùng để ký JWT ở Web App Backend.
 
 ---
 
@@ -171,7 +189,7 @@ Client App
       Gateway
         │
         ├── granted: true  → chuyển tiếp lệnh gốc tới Client App
-        └── granted: false → trả error USER_REJECTED về Web App
+        └── granted: false → trả error PERMISSION_DENIED về Web App
 
 ```
 
@@ -217,7 +235,12 @@ Client App
 
 ## Permission Timeout
 
-* Nếu End User không phản hồi trong **15 giây**, hệ thống tự động đánh giá là Từ chối và trả về lỗi `CONSENT_TIMEOUT` cho Web App.
+Có 2 lớp timeout độc lập:
+
+1. **Client App (15 giây, `PERMISSION_TIMEOUT_SECONDS`):** Nếu End User không bấm Accept/Reject trên Popup trong 15 giây, Client App tự động coi là Từ chối và **chủ động gửi** `permission.response { granted: false }` về Gateway → Gateway trả lỗi `PERMISSION_DENIED` cho Web App.
+2. **Gateway (30 giây mặc định, `PERMISSION_TIMEOUT` trong `.env`):** Là lớp bảo vệ dự phòng — nếu vì lý do nào đó (VD: Client App mất kết nối giữa chừng) Gateway không nhận được `permission.response` trong khoảng thời gian này, Gateway tự trả lỗi `PERMISSION_TIMEOUT` cho Web App mà không cần chờ Client App phản hồi.
+
+> Vì (1) luôn xảy ra trước (2) trong điều kiện vận hành bình thường, lỗi thực tế Web App nhận được khi End User không phản hồi là `PERMISSION_DENIED`; `PERMISSION_TIMEOUT` chỉ xuất hiện khi Client App bị treo/mất kết nối trong lúc chờ Popup.
 
 ---
 
@@ -829,6 +852,10 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 
 # Error Response
 
+Lỗi có thể do **Client App** phát ra (gửi ngược về Gateway để forward cho Web App) hoặc do chính **Gateway** phát ra (khi route/permission/timeout thất bại, không cần hỏi Client App).
+
+Ví dụ lỗi từ Client App (thực thi lệnh thất bại):
+
 ```json
 {
   "messageId": "uuid",
@@ -837,8 +864,26 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
   "source": "client-app-01",
   "destination": "gateway",
   "payload": {
-    "code": "USER_REJECTED",
-    "message": "End user rejected the request.",
+    "code": "INTERNAL_ERROR",
+    "message": "Không thể truy cập webcam trên máy.",
+    "originalMessageId": "uuid-of-failed-request"
+  }
+}
+
+```
+
+Ví dụ lỗi do Gateway phát ra (End User từ chối cấp quyền):
+
+```json
+{
+  "messageId": "uuid",
+  "type": "error",
+  "timestamp": 1710000000,
+  "source": "gateway",
+  "destination": "webapp",
+  "payload": {
+    "code": "PERMISSION_DENIED",
+    "message": "Permission denied for 'webcam.start'.",
     "originalMessageId": "uuid-of-failed-request"
   }
 }
@@ -853,30 +898,31 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 
 | Code | Mô tả |
 | --- | --- |
-| `AUTHENTICATION_FAILED` | Sai Token hoặc sai Machine Secret |
-| `AUTHORIZATION_FAILED` | Token hợp lệ nhưng không đủ quyền thực hiện hành động |
+| `AUTHENTICATION_FAILED` | Sai Token, sai `machineId`/`machineSecret`, hoặc không gửi `auth.client`/`auth.webapp` đúng hạn/đúng thứ tự. |
+| `AUTHORIZATION_FAILED` | *(Dự kiến, chưa implement)* Token hợp lệ nhưng không đủ quyền thực hiện hành động. Hiện tại message type không hợp lệ từ Web App được trả về bằng `INVALID_COMMAND` thay vì mã này. |
 
 ## Machine
 
 | Code | Mô tả |
 | --- | --- |
-| `MACHINE_OFFLINE` | Gateway không tìm thấy Client ID trong Registry |
-| `MACHINE_NOT_FOUND` | Không tìm thấy machineId trong CSDL |
+| `MACHINE_OFFLINE` | Gateway không tìm thấy Client ID trong Registry, hoặc gửi message tới machine thất bại. |
+| `MACHINE_NOT_FOUND` | Không tìm thấy `machineId` trong Registry của Gateway. |
 
 ## Permission
 
 | Code | Mô tả |
 | --- | --- |
-| `USER_REJECTED` | End User bấm Reject trên Popup xin quyền |
-| `CONSENT_TIMEOUT` | End User không phản hồi sau 15 giây (Auto-Reject) |
+| `PERMISSION_DENIED` | End User bấm Reject trên Popup xin quyền (hoặc tự động Reject sau 15 giây không phản hồi). *(Trước đây gọi là `USER_REJECTED`.)* |
+| `PERMISSION_TIMEOUT` | Gateway không nhận được `permission.response` trong thời gian chờ cấu hình (mặc định 30 giây). *(Trước đây gọi là `CONSENT_TIMEOUT`.)* |
 
 ## Command
 
 | Code | Mô tả |
 | --- | --- |
-| `INVALID_COMMAND` | Lệnh không tồn tại hoặc sai format JSON |
-| `ALREADY_RUNNING` | Chức năng (live screen / keylogger) đang chạy rồi |
-| `NOT_RUNNING` | Chức năng chưa được khởi động, không thể stop |
+| `INVALID_COMMAND` | Lệnh không tồn tại, sai format JSON, message type không được phép, hoặc thiếu `destinationMachineId`. |
+| `ALREADY_RUNNING` | Chức năng (live screen / webcam / keylogger) đang chạy rồi. |
+| `NOT_RUNNING` | Chức năng chưa được khởi động, không thể stop. |
+| `TIMEOUT` | Client App không phản hồi (`response`/`error`) trong `COMMAND_TIMEOUT` giây (mặc định 15s) sau khi Gateway forward lệnh. |
 
 ## File
 
@@ -890,8 +936,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 
 | Code | Mô tả |
 | --- | --- |
-| `WEBCAM_NOT_FOUND` | Không tìm thấy webcam trên máy |
-| `WEBCAM_ALREADY_IN_USE` | Webcam đang được sử dụng bởi ứng dụng khác |
+| `WEBCAM_NOT_FOUND` | Không mở được thiết bị webcam trên máy (bao gồm cả trường hợp đang bị ứng dụng khác chiếm dụng — Client App hiện tại không phân biệt hai trường hợp này, `WEBCAM_ALREADY_IN_USE` chưa được implement riêng). |
 
 ## System
 

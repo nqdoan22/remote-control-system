@@ -1,0 +1,27 @@
+# Client App (Agent) — Python dependencies
+# Windows 10/11, Python 3.10+
+
+# GUI framework (Main Thread — main_window, permission_popup, red_indicator)
+PyQt6>=6.6.0
+
+# WebSocket client (GatewayService — kết nối tới gateway/main.py)
+websockets>=12.0
+
+# System/process/hardware info (heartbeat cpu/ram, processes.py, applications.py)
+psutil>=5.9.8
+
+# Keyboard hook (keylogger.py)
+pynput>=1.7.7
+
+# Screen capture (screenshot.py, live_screen.py)
+mss>=9.0.1
+
+# Image encode/compress JPEG (screenshot.py, live_screen.py)
+Pillow>=10.2.0
+
+# Webcam capture (webcam.py)
+opencv-python>=4.9.0.80
+
+# Cấu hình ứng dụng (config.py — ClientSettings đọc từ .env)
+pydantic>=2.6.0
+pydantic-settings>=2.2.0

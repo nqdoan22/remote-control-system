@@ -21,12 +21,19 @@ from config import settings
 # Import cửa sổ chính
 from ui.main_window import MainWindow
 
+# Import UI Popup xin quyền (Sensitive Feature) & Overlay đèn báo đỏ Webcam
+from ui.permission_popup import PermissionPopupDialog
+from ui.red_indicator import RedIndicatorWidget
+
 # Import Service quản lý kết nối WebSocket tới Gateway
 from core.gateway_service import GatewayService
 
-# Import Bộ điều phối lệnh (Command Dispatcher)
-# 👉 Thành phần này mới được thêm để THỰC SỰ xử lý các lệnh điều khiển từ WebAdmin
-#    (VD: start_application) thay vì trước đây chỉ log mà không làm gì.
+# Import Service quản lý luồng xin quyền End User (Permission Confirmation)
+from core.permission_service import PermissionService
+
+# Import Bộ điều phối lệnh (Command Dispatcher) — nhận lệnh từ WebAdmin qua
+# Gateway, thực thi bằng các module modules/*.py rồi trả kết quả theo đúng
+# docs/api_contract.md.
 from core.command_dispatcher import CommandDispatcher
 
 # Thiết lập ghi log hệ thống
@@ -70,6 +77,15 @@ class AgentApplication:
         self.main_window = MainWindow()
         self.main_window.show()
 
+        # Overlay đèn báo đỏ (hiển thị khi Webcam đang hoạt động — Privacy-First)
+        self.red_indicator = RedIndicatorWidget()
+
+        # Service quản lý luồng xin quyền End User cho các tính năng nhạy cảm
+        # (screen.live, webcam, keylogger, power.*) — xem Sensitive Feature List
+        # trong docs/api_contract.md.
+        self.permission_service = PermissionService()
+        self.permission_service.show_popup_signal.connect(self._show_permission_popup)
+
         # Khởi chạy GatewayService chạy trên một QThread riêng
         # để quản lý kết nối WebSocket với Gateway Server (Online/Offline).
         self.gateway_service = GatewayService()
@@ -84,7 +100,10 @@ class AgentApplication:
         self.gateway_service.start()
 
         # Khởi tạo Command Dispatcher để xử lý các lệnh điều khiển từ WebAdmin
-        self.command_dispatcher = CommandDispatcher(self.gateway_service, self.main_window)
+        self.command_dispatcher = CommandDispatcher(
+            self.gateway_service, self.main_window, self.permission_service
+        )
+        self.command_dispatcher.red_indicator_signal.connect(self._toggle_red_indicator)
 
         # Chạy Event Loop chính của PyQt6
         exit_code = self.app.exec()
@@ -107,6 +126,24 @@ class AgentApplication:
 
         # Bàn giao cho CommandDispatcher phân loại & thực thi lệnh
         self.command_dispatcher.dispatch(message)
+
+    def _show_permission_popup(self, permission_id: str, feature: str, requested_by: str, timeout_seconds: int):
+        """
+        Slot nhận PermissionService.show_popup_signal — hiển thị Dialog xin quyền
+        Always-on-Top (Modal) ngay trên Main GUI Thread cho End User Accept/Reject.
+        """
+        dialog = PermissionPopupDialog(
+            permission_id, feature, requested_by, timeout_seconds,
+            self.permission_service, parent=self.main_window
+        )
+        dialog.exec()
+
+    def _toggle_red_indicator(self, active: bool):
+        """Slot nhận CommandDispatcher.red_indicator_signal — bật/tắt đèn báo đỏ Webcam."""
+        if active:
+            self.red_indicator.start_indicator("WEBCAM ACTIVE")
+        else:
+            self.red_indicator.stop_indicator()
 
 
 if __name__ == "__main__":

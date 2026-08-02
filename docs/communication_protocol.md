@@ -78,7 +78,7 @@ Mọi message giao tiếp trong hệ thống đều tuân thủ chặt chẽ m�
 | Field | Kiểu dữ liệu | Description (Mô tả) |
 | --- | --- | --- |
 | `messageId` | String (UUID) | Mã định danh duy nhất của message để map Request với Response. |
-| `type` | String | Loại thao tác/lệnh (VD: `system.heartbeat`, `screen.live.start`). |
+| `type` | String | Loại thao tác/lệnh (VD: `heartbeat`, `screen.live.start`). |
 | `timestamp` | Integer | Thời điểm gửi (Unix Epoch Time) để kiểm tra độ trễ mạng. |
 | `source` | String | ID của thành phần gửi (VD: `webapp-backend`, `client-id-123`). |
 | `destination` | String | ID của thành phần nhận (`gateway` hoặc `client-id-xyz`). |
@@ -130,12 +130,13 @@ Dùng cho tín hiệu Heartbeat hoặc dữ liệu Stream không cần phản h�
 ```json
 {
   "messageId": "evt-002",
-  "type": "system.heartbeat",
+  "type": "heartbeat",
   "source": "client-01",
   "destination": "gateway",
   "payload": {
     "status": "online",
-    "cpu_usage": 15.2
+    "cpu_usage": 15.2,
+    "ram_usage": 42.7
   }
 }
 
@@ -149,7 +150,6 @@ Tên message tuân theo format: `[module].[action]`
 
 | Module | Lệnh (Actions) |
 | --- | --- |
-| **system** | `heartbeat`, `auth` |
 | **application** | `list`, `start`, `stop` |
 | **process** | `list`, `kill` |
 | **screen** | `screenshot`, `live.start`, `live.stop`, `live.frame` |
@@ -158,31 +158,55 @@ Tên message tuân theo format: `[module].[action]`
 | **file** | `list`, `upload`, `download` |
 | **power** | `lock`, `restart`, `shutdown`, `sleep` |
 
+> **Ngoại lệ:** `heartbeat`, `auth.client`, `auth.webapp`, `response`, `error` và `permission.*` không theo format `[module].[action]` — đây là các message type hệ thống (System/Envelope-level), không thuộc một module nghiệp vụ cụ thể.
+
 ---
 
 # Authentication Flow (Luồng Xác thực)
 
+Gateway mở **hai endpoint WebSocket riêng biệt** (không phải một endpoint dùng chung):
+
+* `ws://<gateway-host>:8765/client` — dành cho Client App.
+* `ws://<gateway-host>:8765/webapp` — dành cho Web App Backend.
+
+Kết nối vào path khác sẽ bị đóng ngay với close code `4004`.
+
 ## 1. Web App (Backend) Authentication
 
-Web App Backend đóng vai trò như một Super Client. Khi mở WebSocket tới Gateway, thông điệp đầu tiên bắt buộc phải là `system.auth` chứa **JWT Secret**.
-
-## 2. Client App Authentication
-
-Khi Agent khởi động, nó mở kết nối và gửi thông tin định danh:
+Web App Backend đóng vai trò như một Super Client, kết nối vào endpoint `/webapp`. Thông điệp đầu tiên bắt buộc phải là `auth.webapp` chứa JWT Token:
 
 ```json
 {
-  "type": "system.auth",
-  "source": "client-01",
+  "type": "auth.webapp",
+  "source": "webapp",
   "destination": "gateway",
   "payload": {
-    "machineSecret": "d8e8fca2dc0f896fd7cb4cb0031ba249"
+    "token": "jwt-token-from-backend"
   }
 }
 
 ```
 
-*Nếu sai Secret, Gateway đóng kết nối ngay lập tức với mã code `1008 Policy Violation`.*
+## 2. Client App Authentication
+
+Khi Agent khởi động, nó mở kết nối tới endpoint `/client` và gửi thông tin định danh với type `auth.client`:
+
+```json
+{
+  "type": "auth.client",
+  "source": "client-01",
+  "destination": "gateway",
+  "payload": {
+    "machineId": "client-01",
+    "machineSecret": "d8e8fca2dc0f896fd7cb4cb0031ba249",
+    "hostname": "DESKTOP-ABC123",
+    "ipAddress": "192.168.1.100"
+  }
+}
+
+```
+
+*Nếu sai `machineId`/`machineSecret`, Gateway trả về `error` với `code: "AUTHENTICATION_FAILED"` rồi đóng kết nối với close code `4001`. Sau nhiều lần thất bại liên tiếp từ cùng một IP, Gateway tạm khóa (rate limit) các lần thử tiếp theo.*
 
 ---
 
@@ -216,15 +240,16 @@ Tệp tin được chia nhỏ (Chunking) để không làm nghẽn luồng JSON:
 
 # Error Handling & Standard Codes
 
-Nếu có lỗi (Bao gồm cả việc End User từ chối lệnh), Client trả về message có type `error`.
+Nếu có lỗi, thành phần phát hiện lỗi trả về message có type `error`. Với lỗi liên quan Permission (Reject/Timeout), **Gateway** là nơi phát ra `error` cho Web App (Client App chỉ gửi `permission.response { granted: false }`, Gateway mới suy ra và trả lỗi tương ứng).
 
 ```json
 {
   "messageId": "req-002",
   "type": "error",
   "payload": {
-    "code": "USER_REJECTED",
-    "message": "End User denied the webcam request."
+    "code": "PERMISSION_DENIED",
+    "message": "End User denied the webcam request.",
+    "originalMessageId": "req-001"
   }
 }
 
@@ -235,12 +260,18 @@ Nếu có lỗi (Bao gồm cả việc End User từ chối lệnh), Client tr�
 | Mã lỗi | Mô tả nguyên nhân |
 | --- | --- |
 | `AUTHENTICATION_FAILED` | Sai Token hoặc sai Machine Secret. |
-| `MACHINE_OFFLINE` | Gateway không tìm thấy Client ID trong Registry. |
-| `INVALID_COMMAND` | Lệnh không tồn tại hoặc sai format JSON. |
-| `USER_REJECTED` | **End User bấm Reject trên Popup xin quyền.** |
-| `CONSENT_TIMEOUT` | **End User không phản hồi sau 15 giây (Auto-Reject).** |
+| `MACHINE_OFFLINE` | Gateway không tìm thấy Client ID trong Registry, hoặc gửi lệnh thất bại. |
+| `MACHINE_NOT_FOUND` | Không tìm thấy `machineId` trong Registry. |
+| `INVALID_COMMAND` | Lệnh không tồn tại, sai format JSON, hoặc thiếu `destinationMachineId`. |
+| `PERMISSION_DENIED` | **End User bấm Reject trên Popup xin quyền.** (Gateway phát ra) |
+| `PERMISSION_TIMEOUT` | **End User không phản hồi trong thời gian chờ (mặc định 30s tại Gateway).** (Gateway phát ra) |
+| `TIMEOUT` | Client App không gửi `response`/`error` trong `COMMAND_TIMEOUT` giây sau khi nhận lệnh. |
 | `INVALID_PATH` | Cố ý truy cập file ngoài thư mục Sandbox. |
-| `INTERNAL_ERROR` | Lỗi xảy ra trong lúc gọi thư viện hệ thống (psutil, cv2). |
+| `ALREADY_RUNNING` / `NOT_RUNNING` | Chức năng streaming/keylogger đã đang chạy hoặc chưa được khởi động. |
+| `WEBCAM_NOT_FOUND` | Không thể mở thiết bị webcam trên máy Client. |
+| `INTERNAL_ERROR` | Lỗi xảy ra trong lúc gọi thư viện hệ thống (psutil, cv2, mss...). |
+
+> **Lưu ý:** Đây là các mã lỗi hiện đang được Gateway/Client App implement thực tế. `USER_REJECTED`/`CONSENT_TIMEOUT` (dùng ở các bản thiết kế trước) đã được đổi thành `PERMISSION_DENIED`/`PERMISSION_TIMEOUT` để khớp `gateway/core/permission_manager.py`.
 
 ---
 

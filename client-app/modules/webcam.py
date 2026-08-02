@@ -31,13 +31,18 @@ class WebcamStreamer:
         self._cap: Optional[cv2.VideoCapture] = None
 
     async def start_webcam(
-        self, 
-        send_frame_callback: Callable[[str], None], 
+        self,
+        send_frame_callback: Callable[[str, int, int], None],
         camera_index: int = 0,
-        trigger_red_indicator_signal = None
+        fps: Optional[int] = None,
     ) -> bool:
         """
         Mở Camera và bắt đầu gửi luồng hình ảnh.
+
+        Lưu ý: điều khiển Red Indicator (đèn báo đỏ) KHÔNG còn nằm trong module này
+        — CommandDispatcher chịu trách nhiệm bật/tắt đèn qua signal riêng, vì đó là
+        thao tác UI phải chạy trên Main GUI Thread trong khi module này chạy trên
+        Gateway Service Thread (asyncio loop).
         """
         if self.is_streaming:
             logger.warning("⚠️ Webcam đã đang hoạt động!")
@@ -50,21 +55,16 @@ class WebcamStreamer:
             return False
 
         self.is_streaming = True
+        effective_fps = fps or settings.WEBCAM_FPS
+        logger.info(f"📷 [WEBCAM] Đã bật Webcam (FPS: {effective_fps})...")
 
-        # 2. Phát Signal kích hoạt Cửa sổ Báo đỏ (Red Indicator UI)
-        if settings.RED_INDICATOR_ENABLED and trigger_red_indicator_signal:
-            trigger_red_indicator_signal.emit(True)
-            logger.info("🔴 Đã kích hoạt Đèn báo đỏ (Red Indicator) cảnh báo người dùng.")
-
-        logger.info(f"📷 [WEBCAM] Đã bật Webcam (FPS: {settings.WEBCAM_FPS})...")
-
-        # 3. Tạo Background Task stream video
+        # 2. Tạo Background Task stream video
         self._stream_task = asyncio.create_task(
-            self._webcam_loop(send_frame_callback)
+            self._webcam_loop(send_frame_callback, effective_fps)
         )
         return True
 
-    async def stop_webcam(self, trigger_red_indicator_signal = None):
+    async def stop_webcam(self):
         """
         Tắt Camera và Giải phóng tài nguyên Phần cứng.
         """
@@ -72,10 +72,6 @@ class WebcamStreamer:
             return
 
         self.is_streaming = False
-
-        # Tắt Đèn báo đỏ trên màn hình
-        if trigger_red_indicator_signal:
-            trigger_red_indicator_signal.emit(False)
 
         if self._stream_task:
             self._stream_task.cancel()
@@ -92,11 +88,11 @@ class WebcamStreamer:
 
         logger.info("🛑 [WEBCAM] Đã tắt Webcam và giải phóng phần cứng.")
 
-    async def _webcam_loop(self, send_frame_callback: Callable[[str], None]):
+    async def _webcam_loop(self, send_frame_callback: Callable[[str, int, int], None], fps: int):
         """
         Vòng lặp đọc Frame từ OpenCV và nén gửi đi.
         """
-        frame_delay = 1.0 / max(1, settings.WEBCAM_FPS)
+        frame_delay = 1.0 / max(1, fps)
 
         try:
             while self.is_streaming and self._cap and self._cap.isOpened():
@@ -116,9 +112,10 @@ class WebcamStreamer:
                 if result:
                     # Mã hóa Base64
                     base64_frame = base64.b64encode(encimg).decode('utf-8')
-                    
+                    height, width = frame.shape[:2]
+
                     if callable(send_frame_callback):
-                        send_frame_callback(base64_frame)
+                        send_frame_callback(base64_frame, width, height)
 
                 # Tính toán thời gian nghỉ duy trì FPS
                 elapsed = asyncio.get_event_loop().time() - start_time

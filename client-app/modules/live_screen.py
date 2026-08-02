@@ -31,24 +31,32 @@ class LiveScreenStreamer:
         self.is_streaming: bool = False
         self._stream_task: Optional[asyncio.Task] = None
 
-    async def start_stream(self, send_frame_callback: Callable[[str], None], monitor_index: int = 0):
+    async def start_stream(
+        self,
+        send_frame_callback: Callable[[str, int, int], None],
+        monitor_index: int = 0,
+        fps: Optional[int] = None,
+    ):
         """
         Bắt đầu luồng Stream màn hình.
-        
+
         Args:
-            send_frame_callback: Hàm callback nhận chuỗi Base64 JPEG để gửi qua WebSocket.
+            send_frame_callback: Callback nhận (base64_jpeg, width, height) để gửi qua WebSocket
+                                  (frameIndex/timestamp do bên gọi tự đánh số theo api_contract.md).
             monitor_index: Chỉ số màn hình cần stream (0: Màn hình tổng).
+            fps: Số khung hình/giây do Web App yêu cầu (payload.fps). None = dùng settings.SCREEN_FPS.
         """
         if self.is_streaming:
             logger.warning("⚠️ Luồng Stream màn hình đã đang chạy trước đó!")
             return
 
         self.is_streaming = True
-        logger.info(f"📹 [LIVE SCREEN] Khởi chạy luồng stream màn hình (FPS: {settings.SCREEN_FPS})...")
+        effective_fps = fps or settings.SCREEN_FPS
+        logger.info(f"📹 [LIVE SCREEN] Khởi chạy luồng stream màn hình (FPS: {effective_fps})...")
 
         # Tạo Background Task để không làm đóng băng event loop chính
         self._stream_task = asyncio.create_task(
-            self._stream_loop(send_frame_callback, monitor_index)
+            self._stream_loop(send_frame_callback, monitor_index, effective_fps)
         )
 
     async def stop_stream(self):
@@ -69,11 +77,16 @@ class LiveScreenStreamer:
 
         logger.info("🛑 [LIVE SCREEN] Đã dừng luồng stream màn hình.")
 
-    async def _stream_loop(self, send_frame_callback: Callable[[str], None], monitor_index: int):
+    async def _stream_loop(
+        self,
+        send_frame_callback: Callable[[str, int, int], None],
+        monitor_index: int,
+        fps: int,
+    ):
         """
         Vòng lặp chụp và gửi khung hình theo FPS.
         """
-        frame_delay = 1.0 / max(1, settings.SCREEN_FPS)
+        frame_delay = 1.0 / max(1, fps)
 
         try:
             with mss.mss() as sct:
@@ -97,10 +110,11 @@ class LiveScreenStreamer:
 
                     # 4. Mã hóa Base64 và gọi Callback gửi dữ liệu
                     base64_frame = base64.b64encode(buffer.getvalue()).decode("utf-8")
-                    
-                    # Gọi hàm gửi qua WebSocket
+
+                    # Gọi hàm gửi qua WebSocket kèm kích thước ảnh (theo api_contract.md
+                    # screen.live.frame payload cần width/height)
                     if callable(send_frame_callback):
-                        send_frame_callback(base64_frame)
+                        send_frame_callback(base64_frame, img.width, img.height)
 
                     # 5. Tính toán thời gian ngủ để duy trì FPS ổn định
                     elapsed = asyncio.get_event_loop().time() - start_time

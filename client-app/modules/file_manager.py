@@ -57,10 +57,10 @@ def list_directory(subpath: str = "") -> Dict[str, Any]:
         target_dir = _sanitize_path(subpath)
 
         if not target_dir.exists():
-            return {"success": False, "message": f"Thư mục không tồn tại: {subpath}", "items": []}
+            return {"success": False, "code": "FILE_NOT_FOUND", "message": f"Thư mục không tồn tại: {subpath}", "items": []}
 
         if not target_dir.is_dir():
-            return {"success": False, "message": f"Đường dẫn không phải là thư mục: {subpath}", "items": []}
+            return {"success": False, "code": "INVALID_PATH", "message": f"Đường dẫn không phải là thư mục: {subpath}", "items": []}
 
         items: List[Dict[str, Any]] = []
         for entry in target_dir.iterdir():
@@ -85,10 +85,14 @@ def list_directory(subpath: str = "") -> Dict[str, Any]:
 
     except PermissionError as pe:
         logger.warning(f"🛡️ [SECURITY BREACH ATTEMPT] {str(pe)}")
-        return {"success": False, "message": str(pe), "items": []}
+        return {"success": False, "code": "INVALID_PATH", "message": str(pe), "items": []}
     except Exception as e:
         logger.error(f"❌ Lỗi duyệt thư mục: {str(e)}")
-        return {"success": False, "message": f"Lỗi hệ thống: {str(e)}", "items": []}
+        return {"success": False, "code": "INTERNAL_ERROR", "message": f"Lỗi hệ thống: {str(e)}", "items": []}
+
+
+# Giới hạn kích thước file tải lên/xuống qua WebSocket theo docs/api_contract.md
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
 
 def download_file(subpath: str) -> Dict[str, Any]:
@@ -99,12 +103,10 @@ def download_file(subpath: str) -> Dict[str, Any]:
         target_file = _sanitize_path(subpath)
 
         if not target_file.exists() or not target_file.is_file():
-            return {"success": False, "message": "File không tồn tại hoặc là thư mục.", "file_data_base64": ""}
+            return {"success": False, "code": "FILE_NOT_FOUND", "message": "File không tồn tại hoặc là thư mục.", "file_data_base64": ""}
 
-        # Giới hạn kích thước file tải qua WebSocket (VD: tối đa 20MB để tránh tràn RAM)
-        MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
         if target_file.stat().st_size > MAX_FILE_SIZE:
-            return {"success": False, "message": "File vượt quá dung lượng cho phép (Max 20MB).", "file_data_base64": ""}
+            return {"success": False, "code": "FILE_TOO_LARGE", "message": "File vượt quá dung lượng cho phép (Max 50MB).", "file_data_base64": ""}
 
         with open(target_file, "rb") as f:
             encoded_bytes = base64.b64encode(f.read())
@@ -119,9 +121,9 @@ def download_file(subpath: str) -> Dict[str, Any]:
         }
 
     except PermissionError as pe:
-        return {"success": False, "message": str(pe), "file_data_base64": ""}
+        return {"success": False, "code": "INVALID_PATH", "message": str(pe), "file_data_base64": ""}
     except Exception as e:
-        return {"success": False, "message": f"Lỗi đọc file: {str(e)}", "file_data_base64": ""}
+        return {"success": False, "code": "INTERNAL_ERROR", "message": f"Lỗi đọc file: {str(e)}", "file_data_base64": ""}
 
 
 def upload_file(subpath: str, file_data_base64: str) -> Dict[str, Any]:
@@ -131,23 +133,27 @@ def upload_file(subpath: str, file_data_base64: str) -> Dict[str, Any]:
     try:
         target_file = _sanitize_path(subpath)
 
+        file_bytes = base64.b64decode(file_data_base64)
+        if len(file_bytes) > MAX_FILE_SIZE:
+            return {"success": False, "code": "FILE_TOO_LARGE", "message": "File vượt quá dung lượng cho phép (Max 50MB)."}
+
         # Tự động tạo các thư mục cha nếu chưa có
         target_file.parent.mkdir(parents=True, exist_ok=True)
 
-        file_bytes = base64.b64decode(file_data_base64)
         with open(target_file, "wb") as f:
             f.write(file_bytes)
 
         logger.info(f"📤 Đã ghi file thành công vào Sandbox: '{subpath}' ({len(file_bytes)} bytes)")
         return {
             "success": True,
-            "message": f"Đã tải lên thành công file '{target_file.name}'."
+            "message": f"Đã tải lên thành công file '{target_file.name}'.",
+            "saved_path": str(target_file),
         }
 
     except PermissionError as pe:
-        return {"success": False, "message": str(pe)}
+        return {"success": False, "code": "INVALID_PATH", "message": str(pe)}
     except Exception as e:
-        return {"success": False, "message": f"Lỗi ghi file: {str(e)}"}
+        return {"success": False, "code": "INTERNAL_ERROR", "message": f"Lỗi ghi file: {str(e)}"}
 
 
 def delete_item(subpath: str) -> Dict[str, Any]:
@@ -158,7 +164,7 @@ def delete_item(subpath: str) -> Dict[str, Any]:
         target_item = _sanitize_path(subpath)
 
         if not target_item.exists():
-            return {"success": False, "message": "Mục cần xóa không tồn tại."}
+            return {"success": False, "code": "FILE_NOT_FOUND", "message": "Mục cần xóa không tồn tại."}
 
         if target_item.is_file():
             target_item.unlink()
@@ -169,9 +175,9 @@ def delete_item(subpath: str) -> Dict[str, Any]:
         return {"success": True, "message": f"Đã xóa thành công '{target_item.name}'."}
 
     except PermissionError as pe:
-        return {"success": False, "message": str(pe)}
+        return {"success": False, "code": "INVALID_PATH", "message": str(pe)}
     except Exception as e:
-        return {"success": False, "message": f"Lỗi khi xóa: {str(e)}"}
+        return {"success": False, "code": "INTERNAL_ERROR", "message": f"Lỗi khi xóa: {str(e)}"}
 
 
 # =============================================================================

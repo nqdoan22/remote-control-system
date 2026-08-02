@@ -19,14 +19,18 @@ from PyQt6.QtGui import QFont, QColor
 
 logger = logging.getLogger("PermissionPopup")
 
-# Bảng dịch tên Feature sang Tiếng Việt hiển thị cho End User dễ hiểu
+# Bảng dịch tên Feature sang Tiếng Việt hiển thị cho End User dễ hiểu.
+# Khóa PHẢI khớp đúng giá trị "feature" mà gateway/core/permission_manager.py
+# tính ra (msg_type bỏ hậu tố ".start" nếu có — xem docs/api_contract.md,
+# Sensitive Feature List).
 FEATURE_NAMES_VN = {
     "screen.live": "Xem màn hình thời gian thực (Live Screen)",
-    "screen.capture": "Chụp ảnh màn hình (Screenshot)",
     "webcam": "Bật Camera / Webcam",
     "keylogger": "Ghi bàn phím (Keylogger)",
-    "file.manager": "Truy cập Trình quản lý File Sandbox",
-    "power.control": "Điều khiển Nguồn (Khóa/Tắt/Khởi động lại máy)"
+    "power.lock": "Khóa màn hình (Lock Screen)",
+    "power.restart": "Khởi động lại máy (Restart)",
+    "power.shutdown": "Tắt máy (Shutdown)",
+    "power.sleep": "Đưa máy vào chế độ Sleep",
 }
 
 

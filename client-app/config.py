@@ -46,8 +46,8 @@ class ClientSettings(BaseSettings):
     # 1. GATEWAY & NETWORK CONFIG (Cấu hình kết nối Gateway WebSocket)
     # =========================================================================
     GATEWAY_WS_URL: str = Field(
-        default="ws://127.0.0.1:8765/ws/client",
-        description="Đường dẫn WebSocket Endpoint của Gateway server."
+        default="ws://127.0.0.1:8765/client",
+        description="Đường dẫn WebSocket Endpoint của Gateway server dành cho Client App (khớp route '/client' trong gateway/main.py)."
     )
     RECONNECT_INTERVAL_SECONDS: int = Field(
         default=5,

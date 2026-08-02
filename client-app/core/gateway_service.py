@@ -175,10 +175,13 @@ class GatewayService(QThread):
             # Cập nhật chỉ số CPU/RAM lên giao diện chính
             self.metrics_signal.emit(cpu, ram)
 
-            # Đóng gói theo chuẩn WSMessage Envelope (protocol.py)
+            # Đóng gói theo chuẩn WSMessage Envelope. LƯU Ý: type PHẢI là "heartbeat"
+            # (không phải "system.heartbeat") — đây là literal duy nhất mà
+            # gateway/handlers/message_router.py::_CLIENT_ALLOWED_TYPES chấp nhận
+            # từ Client App, xem docs/api_contract.md.
             heartbeat_msg = {
                 "messageId": str(uuid.uuid4()),
-                "type": "system.heartbeat",
+                "type": "heartbeat",
                 "timestamp": int(time.time()),
                 "source": settings.CLIENT_ID,
                 "destination": "gateway",
@@ -186,8 +189,6 @@ class GatewayService(QThread):
                     "status": "online",
                     "cpu_usage": cpu,
                     "ram_usage": ram,
-                    "ip_address": settings.IP_ADDRESS,
-                    "hostname": settings.HOSTNAME
                 }
             }
             await self.send_queue.put(heartbeat_msg)
@@ -195,21 +196,21 @@ class GatewayService(QThread):
     async def _send_auth_message(self):
         """
         Gửi gói tin xác thực đăng ký ban đầu khi vừa kết nối WebSocket thành công.
-        Khớp 100% với MessageHandler._handle_auth của Gateway (role + machineId + machineSecret).
+        Khớp với handlers/client_handler.py::handle_client của Gateway — message đầu
+        tiên PHẢI có type="auth.client" và payload chứa machineId/machineSecret/
+        hostname/ipAddress (xem docs/api_contract.md + security_design.md).
         """
         auth_msg = {
             "messageId": str(uuid.uuid4()),
-            "type": "system.auth",
+            "type": "auth.client",
             "timestamp": int(time.time()),
             "source": settings.CLIENT_ID,
             "destination": "gateway",
             "payload": {
-                "role": "agent",
                 "machineId": settings.CLIENT_ID,
                 "machineSecret": settings.CLIENT_SECRET,
                 "hostname": settings.HOSTNAME,
-                "ip_address": settings.IP_ADDRESS,
-                "os_info": settings.OS_INFO
+                "ipAddress": settings.IP_ADDRESS,
             }
         }
         await self.send_queue.put(auth_msg)
@@ -219,13 +220,27 @@ class GatewayService(QThread):
     # =========================================================================
     def send_message_threadsafe(self, message_dict: Dict[str, Any]):
         """
-        Hàm Thread-safe cho phép các Thread khác (như GUI PyQt6) đẩy tin nhắn 
+        Hàm Thread-safe cho phép các Thread khác (như GUI PyQt6) đẩy tin nhắn
         vào Queue để gửi về Gateway mà không gây xung đột Thread.
         """
         if self.loop and self.send_queue:
             asyncio.run_coroutine_threadsafe(
-                self.send_queue.put(message_dict), 
+                self.send_queue.put(message_dict),
                 self.loop
             )
         else:
             logger.warning("Chưa thể gửi tin nhắn do Async Event Loop chưa sẵn sàng.")
+
+    def run_coroutine_threadsafe(self, coro):
+        """
+        Cho phép các Thread khác (Main GUI Thread) lên lịch chạy một coroutine
+        (VD: screen_streamer.start_stream(...)) ngay trên Event Loop của Thread
+        này. Bắt buộc phải dùng hàm này thay vì gọi await trực tiếp, vì các
+        module streaming (live_screen, webcam) tạo asyncio.Task/Queue gắn với
+        Event Loop đang chạy — chúng phải chạy chung Loop với _send_loop/
+        _receive_loop thì mới đẩy được frame vào send_queue.
+        """
+        if self.loop:
+            return asyncio.run_coroutine_threadsafe(coro, self.loop)
+        logger.warning("Chưa thể lên lịch coroutine do Async Event Loop chưa sẵn sàng.")
+        return None

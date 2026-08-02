@@ -37,34 +37,39 @@ class PermissionService(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        
+
         # Bảng lưu trữ các yêu cầu xin quyền đang chờ xử lý (In-flight Requests)
         # Cấu trúc: { permission_id: asyncio.Future }
         self._pending_requests: Dict[str, asyncio.Future] = {}
 
+        # Event Loop nơi request_permission() đang chạy (Gateway Service Thread).
+        # Cần lưu lại để handle_user_response() — gọi từ Main GUI Thread khi
+        # End User bấm nút trên Popup — có thể resolve Future một cách an toàn
+        # xuyên Thread bằng loop.call_soon_threadsafe().
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
     async def request_permission(
-        self, 
-        feature: str, 
-        requested_by: str, 
-        original_message_id: str
+        self,
+        permission_id: str,
+        feature: str,
+        requested_by: str,
     ) -> bool:
         """
-        Hàm bất đồng bộ được gọi bởi CommandDispatcher khi nhận lệnh nhạy cảm.
-        
+        Hàm bất đồng bộ được gọi bởi CommandDispatcher khi nhận lệnh 'permission.request'
+        từ Gateway (permissionId do Gateway sinh ra — Client App PHẢI echo lại đúng
+        permissionId này trong permission.response, xem docs/api_contract.md).
+
         Args:
+            permission_id (str): Mã yêu cầu xin quyền do Gateway cấp.
             feature (str): Tên chức năng nhạy cảm (VD: 'webcam', 'screen.live', 'keylogger')
             requested_by (str): Tên Admin thực hiện gửi lệnh
-            original_message_id (str): ID tin nhắn gốc của lệnh
-            
+
         Returns:
             bool: True nếu End User chọn ACCEPT, False nếu REJECT hoặc TIMEOUT 15s.
         """
-        # 1. Tạo một permission_id duy nhất khớp với Schema protocol.py
-        permission_id = str(uuid.uuid4())
-        
-        # 2. Tạo asyncio.Future để chờ kết quả từ UI Popup
-        loop = asyncio.get_running_loop()
-        future = loop.create_future()
+        # Tạo asyncio.Future để chờ kết quả từ UI Popup
+        self._loop = asyncio.get_running_loop()
+        future = self._loop.create_future()
         self._pending_requests[permission_id] = future
 
         logger.info(
@@ -106,21 +111,30 @@ class PermissionService(QObject):
 
     def handle_user_response(self, permission_id: str, granted: bool):
         """
-        Hàm được GUI Popup (Main Thread) gọi khi End User bấm nút ACCEPT / REJECT 
+        Hàm được GUI Popup (Main Thread) gọi khi End User bấm nút ACCEPT / REJECT
         hoặc khi Thanh đếm ngược 15s trên giao diện chạy hết.
-        
+
+        QUAN TRỌNG: Future gắn với Event Loop của Gateway Service Thread, còn hàm
+        này chạy trên Main GUI Thread → không được set_result() trực tiếp (không
+        thread-safe). Phải lên lịch qua loop.call_soon_threadsafe().
+
         Args:
             permission_id (str): Mã yêu cầu xin quyền
             granted (bool): True nếu bấm Accept, False nếu bấm Reject/Hết giờ
         """
-        if permission_id in self._pending_requests:
-            future = self._pending_requests[permission_id]
-            
-            # Gán kết quả vào Future để giải phóng lệnh 'await' ở hàm request_permission
-            if not future.done():
-                future.set_result(granted)
-        else:
+        if self._loop is None:
+            logger.warning("Event Loop chưa sẵn sàng, không thể resolve permission response.")
+            return
+        self._loop.call_soon_threadsafe(self._resolve_future, permission_id, granted)
+
+    def _resolve_future(self, permission_id: str, granted: bool):
+        """Chạy trên Gateway Service Thread (được lên lịch bởi call_soon_threadsafe)."""
+        future = self._pending_requests.get(permission_id)
+        if future is None:
             logger.debug(f"Nhận phản hồi cho permission_id đã bị dọn dẹp hoặc hết hạn: {permission_id}")
+            return
+        if not future.done():
+            future.set_result(granted)
 
     def _cleanup_request(self, permission_id: str):
         """
