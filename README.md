@@ -1,6 +1,6 @@
 # Remote Control System
 
-Hệ thống điều khiển máy tính từ xa gồm 3 thành phần độc lập.
+Hệ thống điều khiển máy tính từ xa gồm 3 thành phần độc lập. Chi tiết từng thành phần xem ở README riêng: [gateway/README.md](gateway/README.md), [client-app/README.md](client-app/README.md), [web-app/README.md](web-app/README.md).
 
 ## Cấu trúc
 
@@ -10,7 +10,7 @@ remote-control-system/
 │   ├── backend/        # Python FastAPI
 │   └── frontend/       # React (Vite)
 ├── gateway/            # Python WebSocket Gateway
-└── client-app/         # Python Windows Client
+└── client-app/         # Python PyQt6 Windows Client
 ```
 
 ## Khởi động
@@ -41,10 +41,28 @@ npm run dev
 
 ### 4. Client App
 
-Mở `client-app/RemoteControlClient.sln` bằng Visual Studio và build.
+Client App là ứng dụng Python PyQt6 (không phải project .NET). `requirements.txt` hiện đang trống nên cần cài trực tiếp các package được dùng trong mã nguồn:
+
+```bash
+cd client-app
+pip install PyQt6 websockets psutil pynput mss Pillow opencv-python pydantic pydantic-settings
+python main.py
+```
+
+Chi tiết xem [client-app/README.md](client-app/README.md).
 
 ## Kiến trúc
 
 ```
-[Browser - React] ←HTTP/WS→ [FastAPI Backend] ←WS→ [Gateway] ←WS→ [C# WPF Client]
+[Browser - React] <-HTTP/WS-> [FastAPI Backend] <-WS-> [Gateway] <-WS-> [Python PyQt6 Client]
 ```
+
+## Tài liệu khác
+
+- [docs/system_architecture.md](docs/system_architecture.md): kiến trúc hệ thống.
+- [docs/communication_protocol.md](docs/communication_protocol.md): giao thức giao tiếp WebSocket.
+- [docs/api_contract.md](docs/api_contract.md): API contract.
+- [docs/security_design.md](docs/security_design.md): thiết kế bảo mật.
+- [docs/project_requirements.md](docs/project_requirements.md): yêu cầu dự án.
+- [docs/system_specification.md](docs/system_specification.md): đặc tả hệ thống.
+- [docs/TECH_STACK.md](docs/TECH_STACK.md): tech stack.
