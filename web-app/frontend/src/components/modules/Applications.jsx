@@ -13,10 +13,15 @@ const Applications = ({ selectedMachine }) => {
   const [newAppPath, setNewAppPath] = useState('');
   const [filterText, setFilterText] = useState('');
 
+  // Chỉ tự tải lại khi ĐỔI MÁY (machineId). KHÔNG dùng toàn bộ object
+  // selectedMachine làm dependency vì nó được tạo lại khi isConnected
+  // (WebSocket) thay đổi -> sẽ gửi 2 lệnh 'application.list' song song ngay
+  // khi mở trang, lệnh đầu bị đè (pending_by_machine) -> timeout 15s giả.
+  const machineId = selectedMachine?.machineId;
   useEffect(() => {
     fetchApplications();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedMachine]);
+  }, [machineId]);
 
   const fetchApplications = async () => {
     if (!selectedMachine) return;

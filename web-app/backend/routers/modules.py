@@ -229,9 +229,15 @@ async def control_screenshot(
     current_user: User = Depends(get_current_user)
 ):
     """
-    screen.screenshot - Không nằm trong Sensitive Feature List, không cần Permission Confirmation.
+    screen.screenshot - Thuộc Sensitive Feature List (Consent). Gateway sẽ chặn
+    lại và chờ Permission Confirmation từ End User trước khi forward xuống Client
+    App -> dùng timeout dài như các lệnh nhạy cảm khác để không timeout hụt.
     """
-    return await dispatch_command_and_log(db, current_user, req.machine_id, "screen.screenshot", {})
+    # screen.screenshot nằm trong Sensitive Feature List -> có thể chờ Permission Confirmation
+    return await dispatch_command_and_log(
+        db, current_user, req.machine_id, "screen.screenshot", {},
+        timeout=settings.SENSITIVE_COMMAND_TIMEOUT_SECONDS,
+    )
 
 
 # --- MODULE 4: LIVE SCREEN ---

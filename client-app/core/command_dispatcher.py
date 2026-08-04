@@ -196,7 +196,8 @@ class CommandDispatcher(QObject):
             self._send_error(original, "INTERNAL_ERROR", result.get("message", ""))
 
     # =========================================================================
-    # SCREEN — SCREENSHOT (không nhạy cảm) & LIVE SCREEN (nhạy cảm)
+    # SCREEN — SCREENSHOT (nhạy cảm — cần Permission Confirmation từ Gateway)
+    #            & LIVE SCREEN (nhạy cảm)
     # =========================================================================
     def _handle_screen_screenshot(self, payload: Dict[str, Any], original: Dict[str, Any]) -> None:
         result = screenshot.take_screenshot()
@@ -211,10 +212,9 @@ class CommandDispatcher(QObject):
             self._send_error(original, "INTERNAL_ERROR", result.get("message", "Chụp màn hình thất bại."))
 
     def _handle_screen_live_start(self, payload: Dict[str, Any], original: Dict[str, Any]) -> None:
-        if screen_streamer.is_streaming:
-            self._send_error(original, "ALREADY_RUNNING", "Live Screen đang chạy rồi.")
-            return
-
+        # KHÔNG còn từ chối ALREADY_RUNNING nữa: nếu stream cũ (VD: lần trước
+        # Admin rời trang đột ngột) vẫn chưa tắt, LiveScreenStreamer.start_stream
+        # sẽ tự động dừng stream cũ rồi khởi động lại -> lệnh start luôn thành công.
         fps = self._clamp_fps(payload.get("fps"), settings.SCREEN_FPS)
         frame_counter = {"n": 0}
 
@@ -231,16 +231,17 @@ class CommandDispatcher(QObject):
                 },
             )
 
-        self.gateway_service.run_coroutine_threadsafe(screen_streamer.start_stream(on_frame, fps=fps))
+        # start_stream/stop_stream giờ là hàm đồng bộ chạy trên worker thread,
+        # KHÔNG cần lên lịch coroutine trên event loop (event loop luôn rảnh để
+        # nhận lệnh điều khiển tiếp theo ngay lập tức).
+        screen_streamer.start_stream(on_frame, fps=fps)
         self.main_window.append_log(f"📹 Bắt đầu Live Screen (FPS: {fps}).")
         self._send_response(original, {})
 
     def _handle_screen_live_stop(self, payload: Dict[str, Any], original: Dict[str, Any]) -> None:
-        if not screen_streamer.is_streaming:
-            self._send_error(original, "NOT_RUNNING", "Live Screen chưa được khởi động.")
-            return
-
-        self.gateway_service.run_coroutine_threadsafe(screen_streamer.stop_stream())
+        # Idempotent: dừng stream dù đang chạy hay đã dừng đều trả response thành
+        # công — tránh cảnh lệnh stop thất bại khiến stream không bao giờ tắt được.
+        screen_streamer.stop_stream()
         self.main_window.append_log("🛑 Đã dừng Live Screen.")
         self._send_response(original, {})
 

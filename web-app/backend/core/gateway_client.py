@@ -62,11 +62,16 @@ class GatewayClient:
         # Theo api_contract.md, response THÀNH CÔNG từ Client App không mang
         # originalMessageId (chỉ error response mới có). Gateway forward response
         # nguyên vẹn (chỉ đổi source=machine_id), nên không có field nào nối lại
-        # với messageId của request gốc. Do đó theo dõi request đang chờ theo
-        # machine_id (giả định tối đa 1 lệnh in-flight / machine — khớp với
-        # CommandTracker phía Gateway).
-        # Key: machine_id (str) | Value: messageId của request đang chờ trên machine đó
-        self.pending_by_machine: Dict[str, str] = {}
+        # với messageId của request gốc.
+        #
+        # Client App xử lý lệnh TUẦN TỰ (1 dispatcher, cùng main thread) nên response
+        # về theo đúng thứ tự lệnh gửi xuống. Vì vậy lưu HÀNG ĐỢI FIFO các messageId
+        # đang chờ cho mỗi machine: khi nhận response thành công, pop messageId cũ
+        # nhất ra và khớp với request tương ứng. Tránh bug lệnh in-flight bị đè bởi
+        # lệnh kế tiếp (VD: Frontend gửi 2 lệnh 'application.list' song song) làm
+        # lệnh đầu timeout giả sau 15s.
+        # Key: machine_id (str) | Value: list[str] — messageId các request đang chờ (FIFO)
+        self.pending_by_machine: Dict[str, list[str]] = {}
 
         # BẢNG TRA CỨU REQUEST TỪ BROWSER (Browser Pending):
         # Map messageId của lệnh gửi từ Browser -> WebSocket của Browser đó.
@@ -216,7 +221,13 @@ class GatewayClient:
             if original_id and original_id in self.pending_requests:
                 target_id = original_id
             elif message.type == "response" and message.source in self.pending_by_machine:
-                target_id = self.pending_by_machine.get(message.source)
+                # Response thành công không mang originalMessageId -> khớp FIFO theo
+                # thứ tự lệnh gửi xuống máy (pop lệnh cũ nhất trước).
+                queue = self.pending_by_machine.get(message.source) or []
+                if queue:
+                    target_id = queue.pop(0)
+                    if not queue:
+                        del self.pending_by_machine[message.source]
             elif msg_id in self.pending_requests:
                 target_id = msg_id
 
@@ -228,8 +239,11 @@ class GatewayClient:
                     future.set_result(message)
                     logger.info(f"✅ Đã khớp và trả kết quả cho Request ID: {target_id}")
             else:
-                # Tin nhắn không thuộc Request nào đang chờ (VD: Tín hiệu Broadcast / Heartbeat ngầm)
-                logger.info(f"Nhận tin nhắn sự kiện chủ động (Event/Broadcast): {message.type}")
+                # Tin nhắn không thuộc Request nào đang chờ (VD: Tín hiệu Broadcast / Heartbeat ngầm).
+                # Ghi DEBUG thay vì INFO: lúc đang Live Screen/Webcam stream, broadcast frame
+                # đến 10 lần/giây -> logger.info tại đây gây gánh nặng I/O, dễ làm chậm
+                # event loop và tạo backpressure tới Gateway/Client (lệnh khác bị timeout).
+                logger.debug(f"Nhận tin nhắn sự kiện chủ động (Event/Broadcast): {message.type}")
 
             # =========================================================================
             # 📡 ĐỊNH TUYẾN VỀ BROWSER (CẦU NỐI REAL-TIME /ws)
@@ -352,7 +366,8 @@ class GatewayClient:
         # machine_id để khớp response thành công (không có originalMessageId).
         target_machine_id = message.payload.get("destinationMachineId") if isinstance(message.payload, dict) else None
         if target_machine_id:
-            self.pending_by_machine[target_machine_id] = message.messageId
+            # Đẩy messageId vào cuối hàng đợi FIFO của machine (khớp thứ tự gửi).
+            self.pending_by_machine.setdefault(target_machine_id, []).append(message.messageId)
 
         try:
             # Chuyển đổi WSMessage Schema thành chuỗi JSON và gửi qua WebSocket
@@ -371,9 +386,14 @@ class GatewayClient:
         finally:
             # Luôn dọn dẹp ID khỏi bảng tra cứu để tránh rò rỉ bộ nhớ (Memory Leak)
             self.pending_requests.pop(message.messageId, None)
-            # Chỉ xóa nếu vẫn là request này (tránh xóa nhầm request mới hơn trên cùng machine)
-            if target_machine_id and self.pending_by_machine.get(target_machine_id) == message.messageId:
-                self.pending_by_machine.pop(target_machine_id, None)
+            # Gỡ messageId này khỏi hàng đợi FIFO của machine (dù request thành công
+            # hay timeout) — tránh rò rỉ entry khi hết thời gian chờ.
+            if target_machine_id:
+                queue = self.pending_by_machine.get(target_machine_id)
+                if queue and message.messageId in queue:
+                    queue.remove(message.messageId)
+                    if not queue:
+                        self.pending_by_machine.pop(target_machine_id, None)
 
     async def send_fire_and_forget(self, message: WSMessage):
         """

@@ -37,6 +37,15 @@ from core.permission_service import PermissionService
 from core.command_dispatcher import CommandDispatcher
 
 # Thiết lập ghi log hệ thống
+# Windows console/redirect thường dùng encoding cp1252 → mọi log tiếng Việt/emoji
+# (đặc biệt trong luồng Permission/Consent) ném UnicodeEncodeError. Chuyển
+# stdout/stderr sang UTF-8 (fallback 'replace') để không còn lỗi encoding.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError, OSError):
+        pass
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -132,10 +141,17 @@ class AgentApplication:
         Slot nhận PermissionService.show_popup_signal — hiển thị Dialog xin quyền
         Always-on-Top (Modal) ngay trên Main GUI Thread cho End User Accept/Reject.
         """
+        # Create popup as a TOP-LEVEL always-on-top window (NO hidden MainWindow
+        # parent). Khi MainWindow bị thu nhỏ xuống System Tray (hành vi mặc định
+        # của Agent), một QDialog có parent là cửa sổ ẩn sẽ KHÔNG BAO GIỜ được
+        # hiển thị (visible=False suốt exec()). Nên phải tạo dialog độc lập.
         dialog = PermissionPopupDialog(
             permission_id, feature, requested_by, timeout_seconds,
-            self.permission_service, parent=self.main_window
+            self.permission_service,
         )
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
         dialog.exec()
 
     def _toggle_red_indicator(self, active: bool):

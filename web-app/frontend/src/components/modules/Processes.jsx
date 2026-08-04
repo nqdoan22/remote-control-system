@@ -10,10 +10,13 @@ const Processes = ({ selectedMachine }) => {
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Chỉ tự tải khi ĐỔI MÁY (machineId), tránh gửi 2 lệnh 'process.list' song
+  // song khi selectedMachine bị tạo lại do isConnected (WS) thay đổi.
+  const machineId = selectedMachine?.machineId;
   useEffect(() => {
     fetchProcesses();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedMachine]);
+  }, [machineId]);
 
   const fetchProcesses = async () => {
     if (!selectedMachine) return;
@@ -27,7 +30,9 @@ const Processes = ({ selectedMachine }) => {
         setProcessList(getWsData(res).processes || []);
       }
     } catch (err) {
-      alert('Lỗi lấy danh sách tiến trình: ' + (err?.detail || 'Không rõ nguyên nhân'));
+      const reason =
+        typeof err === 'string' ? err : err?.detail || err?.message || 'Không rõ nguyên nhân';
+      alert('Lỗi lấy danh sách tiến trình: ' + reason);
     } finally {
       setLoading(false);
     }
@@ -40,7 +45,9 @@ const Processes = ({ selectedMachine }) => {
         const res = await controlProcessesApi(selectedMachine.machineId, 'kill', { pid });
         if (isWsError(res)) alert('Lỗi diệt tiến trình: ' + getWsErrorMessage(res));
       } catch (err) {
-        alert('Lỗi diệt tiến trình: ' + (err?.detail || 'Không rõ nguyên nhân'));
+        const reason =
+          typeof err === 'string' ? err : err?.detail || err?.message || 'Không rõ nguyên nhân';
+        alert('Lỗi diệt tiến trình: ' + reason);
       }
       setTimeout(fetchProcesses, 1000);
     }

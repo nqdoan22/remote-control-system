@@ -9,7 +9,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 10000, // Timeout sau 10s nếu backend không hồi đáp
+  timeout: 25000, // Timeout mặc định: 25s. Các lệnh Module chờ phản hồi tới 15s (COMMAND_TIMEOUT_SECONDS) ở Backend, nên 10s là quá ngắn -> axios tự hủy request -> Frontend báo lỗi sai ('Không rõ nguyên nhân').
 });
 
 // 2. Request Interceptor: Tự động "dán" JWT Token vào mỗi Request
@@ -130,7 +130,11 @@ export const controlProcessesApi = (machineId, action, extra = {}) =>
   api.post('/modules/processes', { machine_id: machineId, action, ...extra });
 
 export const takeScreenshotApi = (machineId) =>
-  api.post('/modules/screenshot', { machine_id: machineId });
+  api.post(
+    '/modules/screenshot',
+    { machine_id: machineId },
+    { timeout: SENSITIVE_COMMAND_TIMEOUT_MS }
+  );
 
 // Lệnh thuộc Sensitive Feature List (screen.live.start, webcam.start, keylogger.start,
 // power.*) có thể mất tới ~35s phía Backend (chờ Permission Confirmation ở Gateway,

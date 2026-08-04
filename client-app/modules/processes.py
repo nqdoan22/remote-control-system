@@ -35,6 +35,15 @@ def list_processes() -> List[Dict[str, Any]]:
     """
     process_list: List[Dict[str, Any]] = []
 
+    # Lấy tổng RAM một lần duy nhất để tính dung lượng MB từ memory_percent,
+    # TRÁNH gọi proc.memory_info().rss cho từng tiến trình (hàng trăm syscall
+    # làm lệnh process.list chậm, dễ vượt timeout của Backend/Frontend).
+    total_mem_bytes = 0
+    try:
+        total_mem_bytes = psutil.virtual_memory().total
+    except Exception:
+        total_mem_bytes = 0
+
     # psutil.process_iter lấy thông tin tối ưu bằng cách chỉ quét các field yêu cầu
     for proc in psutil.process_iter([
         'pid', 'name', 'username', 'cpu_percent', 'memory_percent', 'status'
@@ -46,12 +55,10 @@ def list_processes() -> List[Dict[str, Any]]:
             cpu_usage = round(pinfo.get('cpu_percent') or 0.0, 1)
             mem_usage = round(pinfo.get('memory_percent') or 0.0, 1)
 
-            # Tính dung lượng RAM thực tế (MB) từ RSS để Frontend Processes.jsx
-            # hiển thị cột "RAM Usage (MB)" (Frontend đọc field `memory_mb`).
-            try:
-                mem_mb = round(proc.memory_info().rss / (1024 * 1024), 1)
-            except Exception:
-                mem_mb = 0.0
+            # Tính dung lượng RAM thực tế (MB) từ memory_percent và tổng RAM
+            # (Frontend Processes.jsx đọc field `memory_mb`). Không dùng
+            # memory_info().rss vì là syscall chậm cho từng process.
+            mem_mb = round((total_mem_bytes * (mem_usage / 100.0)) / (1024 * 1024), 1)
             
             process_list.append({
                 "pid": pinfo['pid'],

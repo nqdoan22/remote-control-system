@@ -24,6 +24,7 @@ logger = logging.getLogger("PermissionPopup")
 # tính ra (msg_type bỏ hậu tố ".start" nếu có — xem docs/api_contract.md,
 # Sensitive Feature List).
 FEATURE_NAMES_VN = {
+    "screen.screenshot": "Chụp ảnh màn hình (Screenshot)",
     "screen.live": "Xem màn hình thời gian thực (Live Screen)",
     "webcam": "Bật Camera / Webcam",
     "keylogger": "Ghi bàn phím (Keylogger)",
@@ -66,7 +67,10 @@ class PermissionPopupDialog(QDialog):
         """Thiết lập thuộc tính cửa sổ đè lên trên cùng và chặn nút Đóng X mặc định."""
         # WindowStaysOnTopHint: Luôn hiển thị trên cùng
         # CustomizeWindowHint | WindowTitleHint: Ẩn nút Min/Max/Close tiêu chuẩn
+        # Window (base type): đảm bảo Dialog là cửa sổ độc lập (không phụ thuộc
+        # vào parent) nên hiển thị được ngay cả khi MainWindow bị thu vào System Tray.
         self.setWindowFlags(
+            Qt.WindowType.Window |
             Qt.WindowType.WindowStaysOnTopHint | 
             Qt.WindowType.CustomizeWindowHint | 
             Qt.WindowType.WindowTitleHint

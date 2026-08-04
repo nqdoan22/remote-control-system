@@ -82,6 +82,7 @@ PERMISSION_TIMEOUT: int = int(os.getenv("PERMISSION_TIMEOUT", "30"))
 # Danh sách message types yêu cầu permission confirmation
 # Source of truth: docs/api_contract.md — Sensitive Feature List
 SENSITIVE_MESSAGE_TYPES: frozenset[str] = frozenset({
+    "screen.screenshot",
     "screen.live.start",
     "webcam.start",
     "keylogger.start",

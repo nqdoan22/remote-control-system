@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { controlLiveScreenApi, isWsError, getWsErrorMessage } from '../../services/api';
 
 /**
@@ -21,6 +21,15 @@ const LiveScreen = ({ selectedMachine, lastMessage }) => {
   const lastFpsCalcTimeRef = useRef(Date.now());
   const isStreamingRef = useRef(false); // đọc được giá trị mới nhất trong cleanup unmount
 
+  // ⚠️ Phát hiện Admin đang xem chính máy Client (trình duyệt truy cập qua đúng
+  // IP của máy Agent). Trường hợp này frame chụp lại bao gồm chính cửa sổ đang
+  // hiển thị stream → hiệu ứng gương lặp vô hạn (feedback loop / "đệ quy").
+  const isSelfView = useMemo(() => {
+    if (!selectedMachine) return false;
+    const host = window.location.hostname;
+    return Boolean(host && host === selectedMachine.ipAddress);
+  }, [selectedMachine]);
+
   const stopStreaming = async (silent = false) => {
     setIsStreaming(false);
     isStreamingRef.current = false;
@@ -40,15 +49,15 @@ const LiveScreen = ({ selectedMachine, lastMessage }) => {
       if (isStreamingRef.current) stopStreaming(true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedMachine]);
+  }, [selectedMachine?.machineId]);
 
   // Lắng nghe frame phát về từ Gateway (broadcast theo machine_id)
   useEffect(() => {
     if (!lastMessage || !isStreaming) return;
 
     if (lastMessage.type === 'screen.live.frame') {
-      const { image } = lastMessage.payload || {};
-      if (image) setCurrentFrame(`data:image/jpeg;base64,${image}`);
+      const { image_base64 } = lastMessage.payload || {};
+      if (image_base64) setCurrentFrame(`data:image/jpeg;base64,${image_base64}`);
 
       frameCountRef.current += 1;
       const now = Date.now();
@@ -60,7 +69,7 @@ const LiveScreen = ({ selectedMachine, lastMessage }) => {
     }
   }, [lastMessage, isStreaming]);
 
-  const startStreaming = async () => {
+  const startStreaming = async (retry = true) => {
     if (!selectedMachine) return;
     setLoading(true);
     try {
@@ -68,6 +77,17 @@ const LiveScreen = ({ selectedMachine, lastMessage }) => {
       const res = await controlLiveScreenApi(selectedMachine.machineId, 'start', fps);
       setLoading(false);
       if (isWsError(res)) {
+        const code = res.payload?.code;
+        if (retry && code === 'ALREADY_RUNNING') {
+          // Client vẫn còn stream cũ (VD: lần trước rời trang đột ngột, lệnh stop
+          // chưa kịp về). Tự động tắt stream cũ rồi bật lại ngay cho Admin.
+          try {
+            await controlLiveScreenApi(selectedMachine.machineId, 'stop');
+          } catch (err) {
+            /* bỏ qua — start lại lần 2 vẫn xử lý tiếp */
+          }
+          return startStreaming(false);
+        }
         alert(getWsErrorMessage(res));
       } else {
         setIsStreaming(true);
@@ -81,6 +101,18 @@ const LiveScreen = ({ selectedMachine, lastMessage }) => {
 
   return (
     <div style={styles.container}>
+      {isSelfView && (
+        <div style={styles.selfViewWarning}>
+          <span style={{ fontSize: '1.2rem', marginRight: '8px' }}>🪞</span>
+          <div>
+            <b>Bạn đang xem chính máy này</b> (trình duyệt đang truy cập qua IP{' '}
+            {selectedMachine?.ipAddress}). Khi bật Live Screen sẽ xuất hiện hiệu ứng
+            lặp vô hạn (feedback loop) và máy dễ bị giật/lag. Nên thu nhỏ cửa sổ
+            trình duyệt hoặc điều khiển từ một máy khác.
+          </div>
+        </div>
+      )}
+
       <div style={styles.topBar}>
         <div style={styles.controlsGroup}>
           {!isStreaming ? (
@@ -150,6 +182,7 @@ const LiveScreen = ({ selectedMachine, lastMessage }) => {
 
 const styles = {
   container: { display: 'flex', flexDirection: 'column', height: '100%', gap: '12px' },
+  selfViewWarning: { display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: '#451a03', border: '1px solid #f59e0b', color: '#fde68a', padding: '10px 14px', borderRadius: '8px', fontSize: '0.9rem', lineHeight: 1.5 },
   topBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1e293b', padding: '12px 16px', borderRadius: '8px', border: '1px solid #334155' },
   controlsGroup: { display: 'flex', alignItems: 'center', gap: '16px' },
   btnStart: { padding: '8px 16px', backgroundColor: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' },

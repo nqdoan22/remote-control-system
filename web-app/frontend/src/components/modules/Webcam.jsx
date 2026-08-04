@@ -30,14 +30,14 @@ const Webcam = ({ selectedMachine, lastMessage }) => {
       if (isStreamingRef.current) stopWebcam(true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedMachine]);
+  }, [selectedMachine?.machineId]);
 
   // Lắng nghe frame webcam.frame phát về từ Gateway (broadcast theo machine_id)
   useEffect(() => {
     if (!lastMessage || !isStreaming) return;
     if (lastMessage.type === 'webcam.frame') {
-      const { image } = lastMessage.payload || {};
-      if (image) setCurrentFrame(`data:image/jpeg;base64,${image}`);
+      const { image_base64 } = lastMessage.payload || {};
+      if (image_base64) setCurrentFrame(`data:image/jpeg;base64,${image_base64}`);
     }
   }, [lastMessage, isStreaming]);
 

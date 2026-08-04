@@ -47,9 +47,16 @@ class GatewayService(QThread):
         self.running = True
         self.websocket: Optional[websockets.WebSocketClientProtocol] = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
-        
-        # Hàng đợi chứa các tin nhắn outbound (gửi từ Client -> Gateway)
-        self.send_queue: Optional[asyncio.Queue] = None
+
+        # Hàng đợi tin nhắn ĐIỀU KHIỂN (ưu tiên cao): auth.client, heartbeat,
+        # response/error, permission.response, keylogger.data. Luôn được gửi
+        # TRƯỚC frame stream để response (VD: application.list, process.list)
+        # không bị kẹt sau hàng trăm frame -> Backend không bị timeout 15s.
+        self.control_queue: Optional[asyncio.Queue] = None
+        # Hàng đợi FRAME STREAM (screen.live.frame / webcam.frame): có giới hạn.
+        # Nếu đầy thì bỏ frame cũ nhất (chỉ frame mới nhất có giá trị hiển thị),
+        # tránh việc flood frame làm nghẽn đường gửi điều khiển.
+        self.frame_queue: Optional[asyncio.Queue] = None
 
     # =========================================================================
     # CHÍNH (Vòng lặp QThread)
@@ -63,7 +70,8 @@ class GatewayService(QThread):
         asyncio.set_event_loop(self.loop)
 
         # Khởi tạo Queue trong cùng Event Loop của Asyncio
-        self.send_queue = asyncio.Queue()
+        self.control_queue = asyncio.Queue()
+        self.frame_queue = asyncio.Queue(maxsize=3)
 
         # Chạy tác vụ chính bất đồng bộ
         try:
@@ -146,19 +154,52 @@ class GatewayService(QThread):
 
     async def _send_loop(self):
         """
-        Lấy các tin nhắn trong Queue ra và đẩy lên Gateway qua kết nối WebSocket.
+        Gửi tin nhắn lên Gateway, LUÔN ưu tiên hàng đợi điều khiển trước.
+        Frame stream (screen.live.frame / webcam.frame) chỉ được gửi khi không
+        còn tin nhắn điều khiển nào đang chờ, và được giới hạn số lượng (bỏ
+        frame cũ) để không làm chậm response.
         """
         while self.running and self.websocket:
-            # Lấy tin nhắn từ hàng đợi
-            msg_dict = await self.send_queue.get()
+            # 1. Ưu tiên tuyệt đối: gửi hết tin nhắn điều khiển đang chờ
             try:
-                raw_json = json.dumps(msg_dict)
-                await self.websocket.send(raw_json)
-                logger.debug(f"[SEND] Đã gửi envelope: type={msg_dict.get('type')}")
-            except Exception as e:
-                logger.error(f"Lỗi khi gửi gói tin lên Gateway: {e}")
-            finally:
-                self.send_queue.task_done()
+                control_msg = self.control_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                control_msg = None
+
+            if control_msg is not None:
+                await self._send_one(control_msg)
+                self.control_queue.task_done()
+                continue
+
+            # 2. Không có tin điều khiển -> chờ tin đầu tiên từ 1 trong 2 queue.
+            #    Nếu control xuất hiện trước frame, nó vẫn được ưu tiên.
+            control_task = asyncio.create_task(self.control_queue.get())
+            frame_task = asyncio.create_task(self.frame_queue.get())
+            done, pending = await asyncio.wait(
+                {control_task, frame_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            for task in done:
+                try:
+                    msg = task.result()
+                except (asyncio.QueueEmpty, asyncio.CancelledError):
+                    continue
+                await self._send_one(msg)
+                if task is control_task:
+                    self.control_queue.task_done()
+                else:
+                    self.frame_queue.task_done()
+
+    async def _send_one(self, msg_dict: Dict[str, Any]):
+        """Serialize và gửi một tin nhắn lên Gateway (bọc lỗi để không chết vòng lặp)."""
+        try:
+            raw_json = json.dumps(msg_dict)
+            await self.websocket.send(raw_json)
+            logger.debug(f"[SEND] Đã gửi envelope: type={msg_dict.get('type')}")
+        except Exception as e:
+            logger.error(f"Lỗi khi gửi gói tin lên Gateway: {e}")
 
     async def _heartbeat_loop(self):
         """
@@ -191,7 +232,7 @@ class GatewayService(QThread):
                     "ram_usage": ram,
                 }
             }
-            await self.send_queue.put(heartbeat_msg)
+            await self.control_queue.put(heartbeat_msg)
 
     async def _send_auth_message(self):
         """
@@ -213,7 +254,7 @@ class GatewayService(QThread):
                 "ipAddress": settings.IP_ADDRESS,
             }
         }
-        await self.send_queue.put(auth_msg)
+        await self.control_queue.put(auth_msg)
 
     # =========================================================================
     # PUBLIC METHOD (Hàm công khai cho bên ngoài gọi để gửi tin nhắn)
@@ -222,23 +263,58 @@ class GatewayService(QThread):
         """
         Hàm Thread-safe cho phép các Thread khác (như GUI PyQt6) đẩy tin nhắn
         vào Queue để gửi về Gateway mà không gây xung đột Thread.
+
+        Message điều khiển (response/error/heartbeat/...) đi vào control_queue
+        (ưu tiên cao). Message frame stream (screen.live.frame/webcam.frame)
+        đi vào frame_queue có giới hạn — khi đầy sẽ bỏ frame cũ để không bao giờ
+        nghẽn đường gửi của các lệnh điều khiển khác.
         """
-        if self.loop and self.send_queue:
-            asyncio.run_coroutine_threadsafe(
-                self.send_queue.put(message_dict),
-                self.loop
-            )
+        if self.loop and self.control_queue and self.frame_queue:
+            msg_type = message_dict.get("type", "")
+            if msg_type in ("screen.live.frame", "webcam.frame"):
+                asyncio.run_coroutine_threadsafe(
+                    self._put_frame(message_dict),
+                    self.loop,
+                )
+            else:
+                asyncio.run_coroutine_threadsafe(
+                    self.control_queue.put(message_dict),
+                    self.loop,
+                )
         else:
             logger.warning("Chưa thể gửi tin nhắn do Async Event Loop chưa sẵn sàng.")
+
+    async def _put_frame(self, message_dict: Dict[str, Any]):
+        """
+        Đẩy frame vào frame_queue giới hạn. Nếu queue đầy, bỏ frame cũ nhất
+        (drop-oldest) rồi thêm frame mới — chỉ frame gần nhất mới có giá trị
+        hiển thị, các frame trung gian vứt bỏ không ảnh hưởng chất lượng stream.
+        """
+        try:
+            self.frame_queue.put_nowait(message_dict)
+        except asyncio.QueueFull:
+            try:
+                self.frame_queue.get_nowait()
+                self.frame_queue.task_done()
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                self.frame_queue.put_nowait(message_dict)
+            except asyncio.QueueFull:
+                logger.debug("Frame queue vẫn đầy, bỏ frame.")
 
     def run_coroutine_threadsafe(self, coro):
         """
         Cho phép các Thread khác (Main GUI Thread) lên lịch chạy một coroutine
-        (VD: screen_streamer.start_stream(...)) ngay trên Event Loop của Thread
+        (VD: webcam_streamer.start_webcam(...)) ngay trên Event Loop của Thread
         này. Bắt buộc phải dùng hàm này thay vì gọi await trực tiếp, vì các
-        module streaming (live_screen, webcam) tạo asyncio.Task/Queue gắn với
-        Event Loop đang chạy — chúng phải chạy chung Loop với _send_loop/
-        _receive_loop thì mới đẩy được frame vào send_queue.
+        module streaming tạo asyncio.Task/Queue gắn với Event Loop đang chạy —
+        chúng phải chạy chung Loop với _send_loop/_receive_loop thì mới đẩy được
+        frame vào queue gửi đi.
+
+        Lưu ý: Live Screen (modules/live_screen.py) KHÔNG còn dùng hàm này nữa —
+        vòng lặp chụp đã được chuyển sang threading.Thread riêng để không chặn
+        event loop (xem ghi chú trong live_screen.py).
         """
         if self.loop:
             return asyncio.run_coroutine_threadsafe(coro, self.loop)

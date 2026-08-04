@@ -25,6 +25,7 @@ Tài liệu bao gồm:
 
 | Feature         | Trigger Message       |
 | --------------- | --------------------- |
+| Screenshot      | `screen.screenshot`   |
 | Live Screen     | `screen.live.start`   |
 | Webcam          | `webcam.start`        |
 | Key Logger      | `keylogger.start`     |
@@ -448,6 +449,12 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 ## screen.screenshot
 
 **Web App → Gateway → Client App**
+
+> **Chức năng nhạy cảm** — nằm trong **Sensitive Feature List**. Gateway sẽ chặn
+> lệnh và thực hiện **Permission Confirmation** (xem **Permission Confirmation
+> Messages**): gửi `permission.request` xuống Client App, chỉ forward `screen.screenshot`
+> tới Client khi End User đồng ý. Nếu từ chối → `PERMISSION_DENIED`, hết giờ →
+> `PERMISSION_TIMEOUT`.
 
 ```json
 {

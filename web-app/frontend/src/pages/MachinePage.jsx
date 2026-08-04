@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 // 1. Import REST API để lấy thông tin tĩnh của máy
 import { getMachineDetailApi } from '../services/api';
@@ -87,14 +87,15 @@ const MachinePage = () => {
   // 🖥️ CHUẨN HÓA selectedMachine: Các Module Component yêu cầu object có
   // { machineId, hostname, ipAddress, status } từ REST MachineResponse.
   // =========================================================================
-  const selectedMachine = machineInfo
-    ? {
-        machineId: machineInfo.machine_id || machineId,
-        hostname: machineInfo.hostname,
-        ipAddress: machineInfo.ip_address,
-        status: isConnected ? 'online' : 'offline',
-      }
-    : null;
+  const selectedMachine = useMemo(() => {
+    if (!machineInfo) return null;
+    return {
+      machineId: machineInfo.machine_id || machineId,
+      hostname: machineInfo.hostname,
+      ipAddress: machineInfo.ip_address,
+      status: isConnected ? 'online' : 'offline',
+    };
+  }, [machineInfo, isConnected, machineId]);
 
   // Component Module đang được chọn theo Tab
   const ActiveModuleComponent = MODULE_COMPONENTS[activeTab];

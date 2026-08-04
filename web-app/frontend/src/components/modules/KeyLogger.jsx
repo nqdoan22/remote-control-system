@@ -35,7 +35,7 @@ const Keylogger = ({ selectedMachine, lastMessage }) => {
       if (isLoggingRef.current) stopKeylogger(true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedMachine]);
+  }, [selectedMachine?.machineId]);
 
   // Tự động cuộn xuống cuối khung Log
   useEffect(() => {

@@ -12,15 +12,18 @@ const FileTransfer = ({ selectedMachine }) => {
   const [loading, setLoading] = useState(false);
   const [transferStatus, setTransferStatus] = useState('');
 
+  // Chỉ reset/tải lại khi ĐỔI MÁY (machineId), tránh gửi lệnh 'file.list' lặp
+  // khi selectedMachine bị tạo lại do isConnected (WS) thay đổi.
+  const machineId = selectedMachine?.machineId;
   useEffect(() => {
     setCurrentPath('C:\\RemoteControl\\');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedMachine]);
+  }, [machineId]);
 
   useEffect(() => {
     fetchDirectoryContent(currentPath);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedMachine, currentPath]);
+  }, [machineId, currentPath]);
 
   // Lấy danh sách File/Thư mục (file.list)
   const fetchDirectoryContent = async (path) => {
