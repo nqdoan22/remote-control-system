@@ -1,22 +1,40 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { fileActionApi, uploadFileApi, isWsError, getWsErrorMessage, getWsData } from '../../services/api';
 
 /**
  * FileTransfer Module - Duyệt thư mục Sandbox & Upload/Download tệp.
  * file.list / file.download / file.upload (api_contract.md) - KHÔNG có cơ chế
  * chunk theo giao thức: mỗi file tối đa 50MB, truyền base64 trong 1 request/response.
+ *
+ * Gốc Sandbox mặc định trùng cấu hình Client (client-app/config.py + .env:
+ * SANDBOX_DIR=C:/AgentSandbox). Sau lần file.list đầu tiên, Client trả về
+ * rootPath (gốc thật của máy) -> Frontend tự khớp lại nếu máy dùng sandbox khác.
  */
+const DEFAULT_SANDBOX_ROOT = 'C:\\AgentSandbox\\';
+
+// Chuẩn hóa đường dẫn dùng ổ định cho các phép so sánh (đổi '/' thành '\', bỏ '\' cuối)
+const norm = (p) => String(p || '').replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase();
+
+// Lấy đường dẫn cha ('C:\AgentSandbox\sub' -> 'C:\AgentSandbox\')
+const parentOf = (p) => {
+  const parts = String(p || '').replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean);
+  parts.pop();
+  return parts.join('\\') + '\\';
+};
+
 const FileTransfer = ({ selectedMachine }) => {
-  const [currentPath, setCurrentPath] = useState('C:\\RemoteControl\\'); // Sandbox mặc định
+  const [currentPath, setCurrentPath] = useState(DEFAULT_SANDBOX_ROOT); // Sandbox mặc định
   const [fileList, setFileList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [transferStatus, setTransferStatus] = useState('');
+  const sandboxRootRef = useRef(DEFAULT_SANDBOX_ROOT); // gốc Sandbox thật của máy hiện tại
 
   // Chỉ reset/tải lại khi ĐỔI MÁY (machineId), tránh gửi lệnh 'file.list' lặp
   // khi selectedMachine bị tạo lại do isConnected (WS) thay đổi.
   const machineId = selectedMachine?.machineId;
   useEffect(() => {
-    setCurrentPath('C:\\RemoteControl\\');
+    sandboxRootRef.current = DEFAULT_SANDBOX_ROOT;
+    setCurrentPath(DEFAULT_SANDBOX_ROOT);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [machineId]);
 
@@ -34,8 +52,19 @@ const FileTransfer = ({ selectedMachine }) => {
       if (isWsError(res)) {
         alert('Không thể mở thư mục: ' + getWsErrorMessage(res));
       } else {
-        // payload.data.entries: [{ name, type: 'file'|'directory', sizeBytes, modifiedAt }]
-        setFileList(getWsData(res).entries || []);
+        // payload.data: { rootPath, entries: [{ name, type, sizeBytes, modifiedAt }] }
+        const data = getWsData(res);
+        const root = data.rootPath;
+        if (root) {
+          // Ghi nhận gốc Sandbox thật để chặn "Thư Mục Cha" đi quá root
+          sandboxRootRef.current = String(root).replace(/[\\/]+$/, '') + '\\';
+          // Tự sửa đường dẫn mặc định nếu máy này đang dùng sandbox khác
+          if (path === DEFAULT_SANDBOX_ROOT && norm(root) !== norm(DEFAULT_SANDBOX_ROOT)) {
+            setCurrentPath(String(root).replace(/[\\/]+$/, '') + '\\');
+            return; // effect chạy lại với currentPath mới
+          }
+        }
+        setFileList(data.entries || []);
       }
     } catch (err) {
       alert('Không thể mở thư mục: ' + (err?.detail || 'Không rõ nguyên nhân'));
@@ -54,10 +83,15 @@ const FileTransfer = ({ selectedMachine }) => {
   };
 
   const handleNavigateUp = () => {
-    const parts = currentPath.split('\\').filter(Boolean);
-    if (parts.length > 1) {
-      parts.pop();
-      setCurrentPath(parts.join('\\') + '\\');
+    const root = norm(sandboxRootRef.current);
+    const parent = norm(parentOf(currentPath));
+    // Không cho đi lên quá gốc Sandbox
+    if (parent === root) {
+      setCurrentPath(sandboxRootRef.current);
+      return;
+    }
+    if (parent.startsWith(root + '\\')) {
+      setCurrentPath(parentOf(currentPath));
     }
   };
 
@@ -90,36 +124,62 @@ const FileTransfer = ({ selectedMachine }) => {
     }
   };
 
-  // 📤 TẢI FILE TỪ ADMIN LÊN CLIENT (file.upload - multipart REST, backend tự encode base64)
-  const handleFileUploadSelect = async (e) => {
-    const file = e.target.files[0];
-    e.target.value = ''; // cho phép chọn lại cùng 1 file lần sau
-    if (!file || !selectedMachine) return;
+  // 📤 TẢI FILE / THƯ MỤC TỪ ADMIN LÊN CLIENT (file.upload - multipart REST,
+  // backend tự encode base64). Hỗ trợ chọn NHIỀU file một lúc + cả folder
+  // (input webkitdirectory -> file.webkitRelativePath giữ cây thư mục).
+  const MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50MB/file (api_contract.md)
 
-    if (file.size > 50 * 1024 * 1024) {
-      alert('File vượt quá giới hạn 50MB cho phép (api_contract.md - FILE_TOO_LARGE).');
-      return;
-    }
+  const handleUploadSelect = (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = ''; // cho phép chọn lại cùng 1 file/folder lần sau
+    if (!files.length || !selectedMachine) return;
+    handleMultiUpload(files);
+  };
 
-    const destinationPath = currentPath.endsWith('\\') ? `${currentPath}${file.name}` : `${currentPath}\\${file.name}`;
-    setTransferStatus(`Đang tải file lên Client: ${file.name}...`);
+  const handleMultiUpload = async (files) => {
+    const total = files.length;
+    let processed = 0;
+    let failed = 0;
+    let skipped = 0;
 
-    try {
-      const res = await uploadFileApi(selectedMachine.machineId, destinationPath, file);
-      if (isWsError(res)) {
-        setTransferStatus('');
-        alert('Lỗi tải file lên: ' + getWsErrorMessage(res));
-        return;
+    for (const file of files) {
+      processed += 1;
+      if (file.size > MAX_UPLOAD_SIZE) {
+        skipped += 1;
+        alert(`File "${file.webkitRelativePath || file.name}" vượt quá giới hạn 50MB, đã bỏ qua (FILE_TOO_LARGE).`);
+        continue;
       }
-      setTransferStatus('🎉 Tải file lên Client hoàn tất!');
-      setTimeout(() => {
-        setTransferStatus('');
-        fetchDirectoryContent(currentPath);
-      }, 1500);
-    } catch (err) {
-      setTransferStatus('');
-      alert('Lỗi tải file lên: ' + (err?.detail || 'Không rõ nguyên nhân'));
+
+      // Thư mục: webkitRelativePath = 'FolderCon/File.txt'; file thường: chỉ có name
+      const relativePath = file.webkitRelativePath || file.name;
+      // Chuẩn hóa dấu phân cách: webkitRelativePath dùng '/', sandbox dùng '\'
+      const normalizedRel = relativePath.replace(/\//g, '\\');
+      const destinationPath = currentPath.endsWith('\\')
+        ? `${currentPath}${normalizedRel}`
+        : `${currentPath}\\${normalizedRel}`;
+      setTransferStatus(`Đang tải (${processed}/${total}): ${relativePath}...`);
+
+      try {
+        const res = await uploadFileApi(selectedMachine.machineId, destinationPath, file);
+        if (isWsError(res)) {
+          failed += 1;
+          alert(`Lỗi tải "${relativePath}": ${getWsErrorMessage(res)}`);
+        }
+      } catch (err) {
+        failed += 1;
+        alert(`Lỗi tải "${relativePath}": ${err?.detail || 'Không rõ nguyên nhân'}`);
+      }
     }
+
+    const uploaded = processed - skipped - failed;
+    const summary = failed
+      ? `⚠️ Đã tải ${uploaded}/${total} mục thành công${skipped ? ` (${skipped} quá 50MB)` : ''}${failed ? ` (${failed} lỗi)` : ''}.`
+      : `🎉 Đã tải ${uploaded} file/thư mục lên Client thành công!`;
+    setTransferStatus(summary);
+    setTimeout(() => {
+      setTransferStatus('');
+      fetchDirectoryContent(currentPath);
+    }, 1500);
   };
 
   return (
@@ -139,12 +199,17 @@ const FileTransfer = ({ selectedMachine }) => {
 
         <label style={styles.btnUpload}>
           📤 Tải File Lên Client
-          <input type="file" onChange={handleFileUploadSelect} style={{ display: 'none' }} />
+          <input type="file" multiple onChange={handleUploadSelect} style={{ display: 'none' }} />
+        </label>
+
+        <label style={styles.btnUploadFolder}>
+          📂 Tải Thư Mục Lên Client
+          <input type="file" webkitdirectory="" onChange={handleUploadSelect} style={{ display: 'none' }} />
         </label>
       </div>
 
       <div style={styles.sandboxNotice}>
-        🔒 Chỉ được thao tác trong thư mục Sandbox đã cấu hình trên Client (mặc định <code>C:\RemoteControl\</code>). Kích thước file tối đa: 50MB.
+        🔒 Chỉ được thao tác trong thư mục Sandbox đã cấu hình trên Client (mặc định <code>C:\AgentSandbox\</code>). Kích thước mỗi file tối đa: 50MB. Có thể chọn nhiều file cùng lúc hoặc cả thư mục.
       </div>
 
       {transferStatus && (
@@ -202,6 +267,7 @@ const styles = {
   btnSecondary: { padding: '8px 12px', backgroundColor: '#334155', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' },
   pathInput: { flex: 1, padding: '8px 12px', backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '6px', color: '#fff', fontFamily: 'monospace' },
   btnUpload: { padding: '8px 16px', backgroundColor: '#0284c7', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem' },
+  btnUploadFolder: { padding: '8px 16px', backgroundColor: '#7c3aed', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem' },
   sandboxNotice: { fontSize: '0.8rem', color: '#94a3b8' },
   progressContainer: { backgroundColor: '#1e293b', padding: '10px 14px', borderRadius: '6px', border: '1px solid #0284c7' },
   progressText: { fontSize: '0.85rem', color: '#38bdf8' },

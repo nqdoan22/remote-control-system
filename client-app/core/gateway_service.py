@@ -100,7 +100,10 @@ class GatewayService(QThread):
         while self.running:
             try:
                 logger.info(f"Đang kết nối tới Gateway tại: {settings.GATEWAY_WS_URL}")
-                async with websockets.connect(settings.GATEWAY_WS_URL) as ws:
+                async with websockets.connect(
+                    settings.GATEWAY_WS_URL,
+                    max_size=settings.WS_MAX_SIZE,
+                ) as ws:
                     self.websocket = ws
                     logger.info(">>> ĐÃ KẾT NỐI THÀNH CÔNG TỚI GATEWAY! <<<")
                     

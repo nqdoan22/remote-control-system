@@ -63,6 +63,12 @@ class Settings(BaseSettings):
     # Thời gian chờ (Timeout) phản hồi lệnh từ Gateway/Client Agent (giây)
     COMMAND_TIMEOUT_SECONDS: int = 15
 
+    # Dung lượng tối đa (bytes) của 1 gói tin WebSocket Backend chấp nhận khi nhận.
+    # Mặc định thư viện websockets là 1MB — quá nhỏ cho File Transfer: file 50MB
+    # (theo api_contract.md) sau base64 ~67MB. Nới lên 100MB để không bị đóng kết
+    # nối khi nhận file.download response từ Client App.
+    WS_MAX_SIZE: int = 100 * 1024 * 1024
+
     # Timeout riêng cho các lệnh thuộc Sensitive Feature List (screen.live.start,
     # webcam.start, keylogger.start, power.*). Theo api_contract.md, Gateway có thể
     # chờ Permission Confirmation từ End User tối đa PERMISSION_TIMEOUT = 30s trước

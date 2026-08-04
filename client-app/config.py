@@ -57,6 +57,14 @@ class ClientSettings(BaseSettings):
         default=5,
         description="Chu kỳ (giây) gửi tín hiệu Heartbeat điểm danh tới Gateway."
     )
+    # Dung lượng tối đa (bytes) của 1 gói tin WebSocket có thể nhận.
+    # Mặc định thư viện websockets là 1MB — quá nhỏ cho File Transfer:
+    # file 50MB (theo api_contract.md) sau base64 ~67MB. Nới lên 100MB để không
+    # bị rớt kết nối khi upload/download file lớn.
+    WS_MAX_SIZE: int = Field(
+        default=100 * 1024 * 1024,
+        description="Giới hạn kích thước tối đa (bytes) của một message WebSocket."
+    )
 
     # =========================================================================
     # 2. AGENT IDENTITY (Định danh máy Client - Khớp với machine.py Schema)
@@ -112,6 +120,17 @@ class ClientSettings(BaseSettings):
     JPEG_QUALITY: int = Field(
         default=60,
         description="Mức chất lượng nén ảnh JPEG (1-100) để tối ưu băng thông mạng LAN."
+    )
+    LIVE_SCREEN_EXCLUDE_OWN_UI: bool = Field(
+        default=True,
+        description="Chống ĐỆ QUY (feedback loop) khi Admin xem chính máy này: che đi các cửa "
+                    "sổ trình duyệt đang hiển thị Web App (tiêu đề chứa LIVE_SCREEN_UI_TITLE_KEYWORD) "
+                    "trong frame Live Screen để không xuất hiện hiệu ứng gương lặp vô hạn."
+    )
+    LIVE_SCREEN_UI_TITLE_KEYWORD: str = Field(
+        default="Remote Control System",
+        description="Từ khóa tiêu đề cửa sổ dùng để nhận diện trình duyệt Web App đang chạy trên "
+                    "chính máy Client (khớp với <title> trong web-app/frontend/index.html)."
     )
 
     class Config:

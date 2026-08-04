@@ -33,6 +33,9 @@ Tài liệu bao gồm:
 | Power — Restart | `power.restart`       |
 | Power — Shutdown| `power.shutdown`      |
 | Power — Sleep   | `power.sleep`         |
+| File — List     | `file.list`           |
+| File — Download | `file.download`       |
+| File — Upload   | `file.upload`         |
 
 Mọi chức năng **không có trong bảng trên** đều không yêu cầu xác nhận.
 
@@ -337,6 +340,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
         {
           "name": "Chrome",
           "pid": 1234,
+          "hwnd": 65792,
           "cpuUsage": 5.2,
           "mainWindowTitle": "New Tab - Google Chrome"
         }
@@ -348,6 +352,11 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 ```
 
 > Application được định nghĩa là tiến trình có cửa sổ giao diện (MainWindowHandle != 0).
+>
+> **`hwnd` là bắt buộc phải truyền lại khi gọi `application.stop`.** Vì một app
+> (VD: Chrome/Edge) có thể mở NHIỀU cửa sổ dùng chung MỘT PID — nếu đóng theo PID
+> sẽ giết cả tiến trình và đóng hết mọi cửa sổ. Chỉ có `hwnd` mới xác định được
+> ĐÚNG cửa sổ cần đóng.
 
 ## application.start
 
@@ -371,11 +380,17 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 {
   "type": "application.stop",
   "payload": {
-    "pid": 1234
+    "pid": 1234,
+    "hwnd": 65792
   }
 }
 
 ```
+
+> `hwnd` (tùy chọn, khuyến nghị): Handle cửa sổ cụ thể lấy từ `application.list`.
+> Khi có `hwnd`, Client App chỉ gửi `WM_CLOSE` tới đúng cửa sổ đó (chỉ đóng 1 cửa
+> sổ — tương đương bấm nút X). Nếu thiếu `hwnd`, Client App giết cả tiến trình
+> (đóng toàn bộ cửa sổ thuộc PID đó).
 
 ---
 
@@ -682,6 +697,8 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 
 > Chỉ được phép thao tác trong **sandbox folder** đã cấu hình (mặc định: `C:\AgentSandbox\`).
 > Mọi nỗ lực truy cập đường dẫn tuyệt đối hoặc dùng `../` nằm ngoài sandbox sẽ bị từ chối với lỗi `INVALID_PATH`.
+>
+> **Chức năng nhạy cảm** — `file.list`, `file.download`, `file.upload` nằm trong **Sensitive Feature List**. Gateway sẽ chặn lệnh và thực hiện **Permission Confirmation** (xem **Permission Confirmation Messages**): gửi `permission.request` xuống Client App, chỉ forward lệnh gốc tới Client khi End User đồng ý. Nếu từ chối → `PERMISSION_DENIED`; hết giờ → `PERMISSION_TIMEOUT`.
 
 ## file.list
 

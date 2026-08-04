@@ -25,16 +25,33 @@ logger = logging.getLogger("FileManagerModule")
 def _sanitize_path(relative_or_subpath: str) -> Path:
     """
     Hàm bổ trợ kiểm tra và quy đổi đường dẫn an toàn trong Sandbox.
-    
+
+    Chấp nhận 2 dạng (theo docs/api_contract.md):
+      - Đường dẫn TUYỆT ĐỐI nằm trong Sandbox (VD: "C:\\AgentSandbox\\document.pdf").
+      - Đường dẫn TƯƠNG ĐỐI so với gốc Sandbox (VD: "", "subfolder", "subfolder\\file.txt").
+
     Raises:
         PermissionError: Nếu đường dẫn vượt ra khỏi thư mục SANDBOX_DIR.
     """
-    # Loại bỏ ký tự phân cách thừa ở đầu đường dẫn
-    clean_subpath = relative_or_subpath.lstrip("/\\")
-    
-    # Tạo đường dẫn tuyệt đối đầy đủ và phân giải các ký tự '..' nếu có
-    target_path = (settings.SANDBOX_DIR / clean_subpath).resolve()
+    # Loại bỏ khoảng trắng/quote thừa ở 2 đầu
+    raw_input = (relative_or_subpath or "").strip().strip("\"'")
+    if not raw_input:
+        raw_input = "."
+
+    # Chuẩn hóa dấu phân cách thư mục về đúng nền tảng đang chạy (Windows: '\')
+    # -> tránh lệch dạng khi Admin nhập '/' còn hệ thống dùng '\' hoặc ngược lại.
+    normalized = raw_input.replace("/", os.sep).replace("\\", os.sep)
+
     sandbox_root = settings.SANDBOX_DIR.resolve()
+    candidate = Path(normalized)
+
+    # Nếu là đường dẫn TƯƠNG ĐỐI -> ghép vào gốc Sandbox trước khi phân giải.
+    # Nếu là đường dẫn TUYỆT ĐỐI -> dùng nguyên vẹn (rồi kiểm tra nằm trong Sandbox).
+    if not candidate.is_absolute():
+        candidate = sandbox_root / candidate
+
+    # Phân giải '..' và '.' để ra đường dẫn tuyệt đối cuối cùng
+    target_path = candidate.resolve()
 
     # Kiểm tra đường dẫn đích có nằm trong Sandbox hay không
     try:
@@ -80,6 +97,9 @@ def list_directory(subpath: str = "") -> Dict[str, Any]:
             "success": True,
             "message": "Lấy danh sách file thành công.",
             "current_path": str(target_dir.relative_to(settings.SANDBOX_DIR.resolve())),
+            # Gốc Sandbox tuyệt đối — giúp Web Admin tự đồng bộ đường dẫn mặc định
+            # theo đúng cấu hình máy Client (không hardcode nhầm folder khác).
+            "root_path": str(settings.SANDBOX_DIR.resolve()),
             "items": items
         }
 
@@ -112,12 +132,14 @@ def download_file(subpath: str) -> Dict[str, Any]:
             encoded_bytes = base64.b64encode(f.read())
             base64_str = encoded_bytes.decode("utf-8")
 
-        logger.info(f"📥 Đã xuất file từ Sandbox: '{subpath}' ({target_file.stat().st_size} bytes)")
+        file_size = target_file.stat().st_size
+        logger.info(f"📥 Đã xuất file từ Sandbox: '{subpath}' ({file_size} bytes)")
         return {
             "success": True,
             "message": f"Tải file '{target_file.name}' thành công.",
             "file_name": target_file.name,
-            "file_data_base64": base64_str
+            "file_data_base64": base64_str,
+            "size_bytes": file_size,
         }
 
     except PermissionError as pe:

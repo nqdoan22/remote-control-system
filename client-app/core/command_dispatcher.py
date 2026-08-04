@@ -14,7 +14,6 @@ ARCHITECTURE ROLE:
 ===============================================================================
 """
 
-import base64
 import logging
 import mimetypes
 import time
@@ -133,6 +132,10 @@ class CommandDispatcher(QObject):
             {
                 "name": app.get("app_name", "Unknown"),
                 "pid": app.get("pid"),
+                # hwnd: Handle CỬA SỔ cụ thể. Cần truyền kèm khi đóng vì một app
+                # (VD: Chrome) có thể có NHIỀU cửa sổ dùng chung 1 PID — chỉ có
+                # hwnd mới phân biệt được từng cửa sổ để đóng đúng 1 cửa sổ.
+                "hwnd": app.get("hwnd"),
                 "cpuUsage": 0.0,
                 "mainWindowTitle": app.get("window_title", ""),
             }
@@ -160,7 +163,17 @@ class CommandDispatcher(QObject):
             self._send_error(original, "INVALID_COMMAND", "Thiếu hoặc sai field 'pid'.")
             return
 
-        result = applications.close_application(pid)
+        # hwnd (tùy chọn): nếu có, chỉ đóng ĐÚNG cửa sổ đó thay vì cả tiến trình.
+        # Quan trọng với Chrome/Edge: nhiều cửa sổ chung 1 PID -> terminate cả
+        # tiến trình sẽ đóng hết mọi cửa sổ, còn đóng theo hwnd chỉ đóng 1 cửa sổ.
+        hwnd = payload.get("hwnd")
+        if hwnd is not None:
+            try:
+                hwnd = int(hwnd)
+            except (TypeError, ValueError):
+                hwnd = None
+
+        result = applications.close_application(pid, hwnd=hwnd)
         if result.get("success"):
             self._send_response(original, {})
         else:
@@ -216,6 +229,9 @@ class CommandDispatcher(QObject):
         # Admin rời trang đột ngột) vẫn chưa tắt, LiveScreenStreamer.start_stream
         # sẽ tự động dừng stream cũ rồi khởi động lại -> lệnh start luôn thành công.
         fps = self._clamp_fps(payload.get("fps"), settings.SCREEN_FPS)
+        # Admin đang xem CHÍNH máy này (Web App tự phát hiện và gửi kèm) → yêu cầu
+        # che toàn bộ cửa sổ trình duyệt để chống đệ quy feedback loop.
+        self_view = bool(payload.get("self_view", False))
         frame_counter = {"n": 0}
 
         def on_frame(base64_img: str, width: int, height: int) -> None:
@@ -234,7 +250,7 @@ class CommandDispatcher(QObject):
         # start_stream/stop_stream giờ là hàm đồng bộ chạy trên worker thread,
         # KHÔNG cần lên lịch coroutine trên event loop (event loop luôn rảnh để
         # nhận lệnh điều khiển tiếp theo ngay lập tức).
-        screen_streamer.start_stream(on_frame, fps=fps)
+        screen_streamer.start_stream(on_frame, fps=fps, mask_browser_windows=self_view)
         self.main_window.append_log(f"📹 Bắt đầu Live Screen (FPS: {fps}).")
         self._send_response(original, {})
 
@@ -346,7 +362,13 @@ class CommandDispatcher(QObject):
             }
             for item in result.get("items", [])
         ]
-        self._send_response(original, {"entries": entries})
+        # rootPath: gốc Sandbox tuyệt đối, giúp Web Admin hiển thị/khôi phục đường
+        # dẫn mặc định đúng theo cấu hình từng máy (file_manager.list_directory trả
+        # về "root_path"). Contract: response.data = { rootPath, entries }.
+        self._send_response(original, {
+            "rootPath": result.get("root_path", str(settings.SANDBOX_DIR.resolve())),
+            "entries": entries,
+        })
 
     def _handle_file_download(self, payload: Dict[str, Any], original: Dict[str, Any]) -> None:
         path = str(payload.get("path", ""))
@@ -358,7 +380,9 @@ class CommandDispatcher(QObject):
         filename = result.get("file_name", "")
         content_b64 = result.get("file_data_base64", "")
         mime_type, _ = mimetypes.guess_type(filename)
-        size_bytes = len(base64.b64decode(content_b64)) if content_b64 else 0
+        # sizeBytes lấy trực tiếp từ stat() của module — không phải decode lại
+        # base64 (tránh tốn gấp đôi bộ nhớ cho file ~50MB).
+        size_bytes = result.get("size_bytes") or 0
 
         self._send_response(original, {
             "filename": filename,

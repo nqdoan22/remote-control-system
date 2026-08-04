@@ -32,6 +32,10 @@ FEATURE_NAMES_VN = {
     "power.restart": "Khởi động lại máy (Restart)",
     "power.shutdown": "Tắt máy (Shutdown)",
     "power.sleep": "Đưa máy vào chế độ Sleep",
+    # File Transfer — các thao tác đọc/ghi/xóa file trong Sandbox
+    "file.list": "Duyệt thư mục (File Browser)",
+    "file.download": "Tải file về (File Download)",
+    "file.upload": "Tải lên file (File Upload)",
 }
 
 

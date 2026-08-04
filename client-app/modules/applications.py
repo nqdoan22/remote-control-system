@@ -24,6 +24,10 @@ user32 = ctypes.windll.user32
 # Định nghĩa kiểu dữ liệu Callback cho EnumWindows API
 WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
+# WM_CLOSE: thông điệp Windows tương đương với việc người dùng bấm nút X trên
+# cửa sổ — yêu cầu cửa sổ tự đóng một cách êm ái, KHÔNG giết cả tiến trình.
+WM_CLOSE = 0x0010
+
 
 def _get_window_title(hwnd: int) -> str:
     """Hàm bổ trợ lấy Tiêu đề (Title) của một Handle Cửa sổ (HWND)."""
@@ -134,17 +138,55 @@ def launch_application(app_command: str) -> Dict[str, Any]:
         }
 
 
-def close_application(pid: int) -> Dict[str, Any]:
+def _close_window_gracefully(hwnd: int) -> bool:
     """
-    Tắt một Ứng dụng giao diện dựa vào PID.
-    
+    Gửi thông điệp WM_CLOSE tới ĐÚNG MỘT cửa sổ (theo HWND) để yêu cầu nó tự đóng.
+
+    Quan trọng: WM_CLOSE tương đương bấm nút X — chỉ đóng cửa sổ đó, KHÔNG giết
+    tiến trình. Điều này rất cần thiết cho các app đa cửa sổ dùng chung MỘT
+    process (Chrome/Edge/Firefox...): nếu dùng terminate() toàn bộ tiến trình,
+    mọi cửa sổ/tab của app đó đều bị đóng cùng lúc.
+
+    Returns:
+        bool: True nếu đã gửi WM_CLOSE thành công, False nếu cửa sổ không còn tồn tại.
+    """
+    if not user32.IsWindow(hwnd):
+        return False
+    # PostMessage (bất đồng bộ, không chờ) để không block luồng của Client App
+    return bool(user32.PostMessageW(hwnd, WM_CLOSE, 0, 0))
+
+
+def close_application(pid: int, hwnd: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Tắt một cửa sổ ứng dụng (ưu tiên theo HWND) hoặc cả tiến trình (theo PID).
+
     Args:
         pid (int): Process ID của ứng dụng cần đóng.
-        
+        hwnd (Optional[int]): Handle cửa sổ CỤ THỂ cần đóng (từ application.list).
+            - Nếu có hwnd: chỉ gửi WM_CLOSE tới đúng cửa sổ đó -> chỉ đóng 1 cửa sổ,
+              an toàn với Chrome/Edge đang mở nhiều cửa sổ chung 1 process.
+            - Nếu None: giữ hành vi cũ, terminate() cả tiến trình (đóng hết mọi
+              cửa sổ thuộc tiến trình đó).
+
     Returns:
         Dict[str, Any]: Kết quả xử lý {"success": bool, "message": str}
     """
     try:
+        # Trường hợp 1: Có hwnd -> đóng ĐÚNG cửa sổ đó (không đụng tới cửa sổ khác).
+        if hwnd is not None:
+            if _close_window_gracefully(hwnd):
+                logger.info(f"🛑 Đã gửi WM_CLOSE tới cửa sổ hwnd={hwnd} của PID {pid}.")
+                return {
+                    "success": True,
+                    "message": f"Đã gửi yêu cầu đóng cửa sổ (hwnd={hwnd})."
+                }
+            # Cửa sổ đã không còn tồn tại -> coi như đã đóng (idempotent).
+            return {
+                "success": True,
+                "message": f"Cửa sổ hwnd={hwnd} đã được đóng trước đó."
+            }
+
+        # Trường hợp 2: Không có hwnd -> đóng cả tiến trình theo PID (hành vi cũ).
         if not psutil.pid_exists(pid):
             return {
                 "success": False,
@@ -153,11 +195,11 @@ def close_application(pid: int) -> Dict[str, Any]:
 
         proc = psutil.Process(pid)
         app_name = proc.name()
-        
+
         # Đóng êm bằng terminate() trước
         proc.terminate()
         _, alive = psutil.wait_procs([proc], timeout=2.0)
-        
+
         # Nếu chưa đóng thì ép đóng bằng kill()
         if alive:
             proc.kill()

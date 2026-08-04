@@ -31,7 +31,7 @@ const Applications = ({ selectedMachine }) => {
       if (isWsError(res)) {
         alert('Lỗi lấy danh sách ứng dụng: ' + getWsErrorMessage(res));
       } else {
-        // payload.data.applications: [{ name, pid, cpuUsage, mainWindowTitle }] theo api_contract.md
+        // payload.data.applications: [{ name, pid, hwnd, cpuUsage, mainWindowTitle }] theo api_contract.md
         setAppList(getWsData(res).applications || []);
       }
     } catch (err) {
@@ -58,11 +58,14 @@ const Applications = ({ selectedMachine }) => {
     }
   };
 
-  // Hàm tắt một ứng dụng đang chạy (application.stop)
-  const handleStopApp = async (pid, appTitle) => {
-    if (window.confirm(`Bạn có chắc muốn đóng ứng dụng: "${appTitle}" (PID: ${pid})?`)) {
+  // Hàm tắt một cửa sổ ứng dụng đang chạy (application.stop).
+  // Truyền kèm hwnd để Client chỉ đóng ĐÚNG cửa sổ đó (WM_CLOSE). Không truyền
+  // hwnd -> Client sẽ giết cả tiến trình, làm Chrome/Edge (nhiều cửa sổ chung 1
+  // PID) bị đóng hết cùng lúc.
+  const handleStopApp = async (pid, hwnd, appTitle) => {
+    if (window.confirm(`Bạn có chắc muốn đóng cửa sổ ứng dụng: "${appTitle}" (PID: ${pid})?`)) {
       try {
-        const res = await controlApplicationsApi(selectedMachine.machineId, 'stop', { pid });
+        const res = await controlApplicationsApi(selectedMachine.machineId, 'stop', { pid, hwnd });
         if (isWsError(res)) alert('Lỗi đóng ứng dụng: ' + getWsErrorMessage(res));
       } catch (err) {
         alert('Lỗi đóng ứng dụng: ' + (err?.detail || 'Không rõ nguyên nhân'));
@@ -127,17 +130,17 @@ const Applications = ({ selectedMachine }) => {
               </tr>
             ) : (
               filteredApps.map((app) => (
-                <tr key={app.pid} style={styles.tr}>
+                <tr key={app.hwnd ?? `${app.pid}-${app.mainWindowTitle}`} style={styles.tr}>
                   <td style={styles.td}><code>{app.pid}</code></td>
                   <td style={styles.td}><b>{app.name}</b></td>
                   <td style={styles.td}>{app.mainWindowTitle || '*(Không có tiêu đề)'}</td>
                   <td style={styles.td}>{app.cpuUsage ?? 0}%</td>
                   <td style={styles.td}>
                     <button
-                      onClick={() => handleStopApp(app.pid, app.mainWindowTitle || app.name)}
+                      onClick={() => handleStopApp(app.pid, app.hwnd, app.mainWindowTitle || app.name)}
                       style={styles.btnDanger}
                     >
-                      🛑 Đóng App
+                      🛑 Đóng Cửa Sổ
                     </button>
                   </td>
                 </tr>

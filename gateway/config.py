@@ -18,6 +18,12 @@ load_dotenv()
 GATEWAY_HOST: str = os.getenv("GATEWAY_HOST", "0.0.0.0")
 GATEWAY_PORT: int = int(os.getenv("GATEWAY_PORT", "8765"))
 
+# Dung lượng tối đa (bytes) của 1 gói tin WebSocket Gateway chấp nhận khi nhận.
+# Mặc định thư viện websockets là 1MB — quá nhỏ cho File Transfer: file 50MB
+# (theo api_contract.md) sau base64 ~67MB. Nới lên 100MB để không bị đóng kết
+# nối khi Client App gửi file.download response hoặc nhận file.upload.
+MAX_WS_MESSAGE_SIZE: int = int(os.getenv("MAX_WS_MESSAGE_SIZE", str(100 * 1024 * 1024)))
+
 # ---------------------------------------------------------------------------
 # Authentication
 # ---------------------------------------------------------------------------
@@ -81,6 +87,8 @@ PERMISSION_TIMEOUT: int = int(os.getenv("PERMISSION_TIMEOUT", "30"))
 
 # Danh sách message types yêu cầu permission confirmation
 # Source of truth: docs/api_contract.md — Sensitive Feature List
+# File Transfer (file.list, file.download, file.upload) cũng nằm trong danh sách
+# vì chúng có thể đọc/ghi/xóa dữ liệu nhạy cảm trong Sandbox.
 SENSITIVE_MESSAGE_TYPES: frozenset[str] = frozenset({
     "screen.screenshot",
     "screen.live.start",
@@ -90,4 +98,8 @@ SENSITIVE_MESSAGE_TYPES: frozenset[str] = frozenset({
     "power.restart",
     "power.shutdown",
     "power.sleep",
+    # File Transfer — yêu cầu Explicit Consent theo Security Design (Nguyên tắc #4)
+    "file.list",
+    "file.download",
+    "file.upload",
 })

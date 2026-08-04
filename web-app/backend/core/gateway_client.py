@@ -106,7 +106,13 @@ class GatewayClient:
                 logger.info(f"Đang kết nối tới Gateway Server tại: {settings.GATEWAY_WS_URL} ...")
                 
                 # Thực hiện kết nối WebSocket tới Gateway
-                async with websockets.connect(settings.GATEWAY_WS_URL) as websocket:
+                # max_size nới lên để chứa được gói file.download response (base64
+                # của file tối đa 50MB ~ 67MB) — mặc định websockets là 1MB sẽ
+                # khiến kết nối bị đóng khi nhận file lớn (PayloadTooBig).
+                async with websockets.connect(
+                    settings.GATEWAY_WS_URL,
+                    max_size=settings.WS_MAX_SIZE,
+                ) as websocket:
                     self.ws = websocket
                     self.is_connected = True
                     logger.info("✅ Đã kết nối thành công tới Gateway Server!")

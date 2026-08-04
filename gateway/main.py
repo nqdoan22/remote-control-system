@@ -84,6 +84,7 @@ async def main():
         router,
         config.GATEWAY_HOST,
         config.GATEWAY_PORT,
+        max_size=config.MAX_WS_MESSAGE_SIZE,
     ):
         # Khởi động heartbeat monitor cùng lúc với server
         heartbeat_task = start_heartbeat(manager)

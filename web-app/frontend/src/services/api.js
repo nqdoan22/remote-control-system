@@ -142,10 +142,10 @@ export const takeScreenshotApi = (machineId) =>
 // sẽ tự hủy request trước khi Backend kịp trả lời.
 const SENSITIVE_COMMAND_TIMEOUT_MS = 40000;
 
-export const controlLiveScreenApi = (machineId, action, fps = 10) =>
+export const controlLiveScreenApi = (machineId, action, fps = 10, selfView = false) =>
   api.post(
     '/modules/live-screen',
-    { machine_id: machineId, action, fps },
+    { machine_id: machineId, action, fps, self_view: selfView },
     { timeout: SENSITIVE_COMMAND_TIMEOUT_MS }
   );
 

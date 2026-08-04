@@ -40,6 +40,13 @@ class AppControlRequest(BaseModel):
     action: str = Field(..., description="Hành động: 'list', 'start', 'stop'")
     path: Optional[str] = Field(None, description="Đường dẫn file .exe cần chạy (dùng cho 'start')")
     pid: Optional[int] = Field(None, description="PID ứng dụng cần dừng (dùng cho 'stop')")
+    hwnd: Optional[int] = Field(
+        None,
+        description="Handle cửa sổ cụ thể cần đóng (dùng cho 'stop'). Khi có hwnd, "
+                    "Client chỉ đóng ĐÚNG cửa sổ đó (WM_CLOSE) thay vì giết cả tiến "
+                    "trình — tránh việc Chrome/Edge nhiều cửa sổ chung 1 PID bị đóng "
+                    "hết cùng lúc.",
+    )
 
 
 class ProcessControlRequest(BaseModel):
@@ -56,6 +63,12 @@ class LiveScreenRequest(BaseModel):
     machine_id: str = Field(...)
     action: str = Field(..., description="Hành động: 'start' hoặc 'stop'")
     fps: Optional[int] = Field(10, description="Số frame/giây (mặc định 10, tối đa 30)")
+    self_view: Optional[bool] = Field(
+        False,
+        description="Admin đang xem CHÍNH máy này (trình duyệt truy cập qua IP trùng "
+                    "IP máy Client) — Client sẽ che toàn bộ cửa sổ trình duyệt trong "
+                    "frame Live Screen để chống đệ quy feedback loop.",
+    )
 
 
 class KeyloggerControlRequest(BaseModel):
@@ -66,7 +79,7 @@ class KeyloggerControlRequest(BaseModel):
 class FileActionRequest(BaseModel):
     machine_id: str = Field(...)
     action: str = Field(..., description="Hành động: 'list' hoặc 'download'")
-    path: Optional[str] = Field("C:\\RemoteControl\\", description="Đường dẫn trong Sandbox")
+    path: Optional[str] = Field("C:\\AgentSandbox\\", description="Đường dẫn trong Sandbox")
 
 
 class WebcamControlRequest(BaseModel):
@@ -201,6 +214,9 @@ async def control_applications(
         payload = {"path": req.path}
     elif req.action == "stop":
         payload = {"pid": req.pid}
+        # hwnd đi kèm (nếu có) để Client đóng đúng 1 cửa sổ thay vì cả tiến trình
+        if req.hwnd is not None:
+            payload["hwnd"] = req.hwnd
     else:
         payload = {}
     return await dispatch_command_and_log(db, current_user, req.machine_id, msg_type, payload)
@@ -253,7 +269,7 @@ async def control_live_screen(
     chặn lại và chờ Permission Confirmation từ End-User trước khi forward.
     """
     msg_type = _resolve_type(_LIVESCREEN_ACTION_TYPE, req.action)
-    payload = {"fps": req.fps or 10} if req.action == "start" else {}
+    payload = {"fps": req.fps or 10, "self_view": bool(req.self_view)} if req.action == "start" else {}
     # screen.live.start nằm trong Sensitive Feature List -> Gateway có thể chờ Permission Confirmation
     timeout = settings.SENSITIVE_COMMAND_TIMEOUT_SECONDS if req.action == "start" else None
     return await dispatch_command_and_log(db, current_user, req.machine_id, msg_type, payload, timeout=timeout)
@@ -285,11 +301,20 @@ async def control_file_action(
 ):
     """
     file.list / file.download. Chỉ thao tác trong sandbox folder (theo security_design.md).
+    *Yêu cầu:* file.list / file.download nằm trong Sensitive Feature List - Gateway
+    sẽ chặn lại và chờ Permission Confirmation từ End User trước khi forward.
     """
     msg_type = _resolve_type(_FILE_ACTION_TYPE, req.action)
-    payload = {"path": req.path or "C:\\RemoteControl\\"}
-    # file.download có thể chứa tới 50MB base64 (api_contract.md) -> cần timeout dài hơn mặc định
-    file_timeout = 60 if req.action == "download" else None
+    payload = {"path": req.path or "C:\\AgentSandbox\\"}
+    # file.* nằm trong Sensitive Feature List -> Gateway có thể chờ Permission
+    # Confirmation tối đa PERMISSION_TIMEOUT (30s) trước khi forward -> cần timeout
+    # dài hơn để Backend không báo TIMEOUT trước khi Gateway giải quyết permission.
+    if req.action == "download":
+        # file.download: consent (30s) + file I/O (có thể tới 50MB) -> 60s an toàn
+        file_timeout = 60
+    else:
+        # file.list: consent (30s) + quick listing -> dùng SENSITIVE_COMMAND_TIMEOUT_SECONDS
+        file_timeout = settings.SENSITIVE_COMMAND_TIMEOUT_SECONDS
     return await dispatch_command_and_log(db, current_user, req.machine_id, msg_type, payload, timeout=file_timeout)
 
 
@@ -304,6 +329,9 @@ async def upload_file_to_agent(
     """
     file.upload - payload theo đúng api_contract.md:
     { destinationPath, filename, content (base64), sizeBytes }.
+    *Yêu cầu:* file.upload nằm trong Sensitive Feature List - Gateway sẽ chặn
+    lại và chờ Permission Confirmation từ End User trước khi forward.
+    Timeout 60s: consent (30s) + upload file lên tới 50MB.
     """
     import base64
 

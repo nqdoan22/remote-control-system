@@ -21,13 +21,17 @@ const LiveScreen = ({ selectedMachine, lastMessage }) => {
   const lastFpsCalcTimeRef = useRef(Date.now());
   const isStreamingRef = useRef(false); // đọc được giá trị mới nhất trong cleanup unmount
 
-  // ⚠️ Phát hiện Admin đang xem chính máy Client (trình duyệt truy cập qua đúng
-  // IP của máy Agent). Trường hợp này frame chụp lại bao gồm chính cửa sổ đang
-  // hiển thị stream → hiệu ứng gương lặp vô hạn (feedback loop / "đệ quy").
+  // ⚠️ Phát hiện Admin đang xem chính máy Client. Trường hợp này frame chụp lại
+  // bao gồm chính cửa sổ trình duyệt đang hiển thị stream → hiệu ứng gương lặp
+  // vô hạn (feedback loop / "đệ quy"). Client sẽ được báo selfView để che toàn bộ
+  // cửa sổ trình duyệt trong stream (kể cả khi đang mở trang web khác).
+  // localhost/127.0.0.1 cũng coi là self-view (khi Admin chạy toàn bộ hệ thống
+  // trên chính máy này để tự kiểm tra).
   const isSelfView = useMemo(() => {
     if (!selectedMachine) return false;
     const host = window.location.hostname;
-    return Boolean(host && host === selectedMachine.ipAddress);
+    if (!host) return false;
+    return host === selectedMachine.ipAddress || host === 'localhost' || host === '127.0.0.1';
   }, [selectedMachine]);
 
   const stopStreaming = async (silent = false) => {
@@ -74,7 +78,7 @@ const LiveScreen = ({ selectedMachine, lastMessage }) => {
     setLoading(true);
     try {
       // Gateway sẽ chặn lại chờ Permission Confirmation (tối đa 30s) trước khi trả response
-      const res = await controlLiveScreenApi(selectedMachine.machineId, 'start', fps);
+      const res = await controlLiveScreenApi(selectedMachine.machineId, 'start', fps, isSelfView);
       setLoading(false);
       if (isWsError(res)) {
         const code = res.payload?.code;
@@ -106,9 +110,9 @@ const LiveScreen = ({ selectedMachine, lastMessage }) => {
           <span style={{ fontSize: '1.2rem', marginRight: '8px' }}>🪞</span>
           <div>
             <b>Bạn đang xem chính máy này</b> (trình duyệt đang truy cập qua IP{' '}
-            {selectedMachine?.ipAddress}). Khi bật Live Screen sẽ xuất hiện hiệu ứng
-            lặp vô hạn (feedback loop) và máy dễ bị giật/lag. Nên thu nhỏ cửa sổ
-            trình duyệt hoặc điều khiển từ một máy khác.
+            {selectedMachine?.ipAddress}). Client sẽ <b>che toàn bộ cửa sổ trình duyệt</b>{' '}
+            trong stream (kể cả khi bạn mở tab/trang web khác) để tránh hiệu ứng gương
+            lặp vô hạn (feedback loop) — vùng đó hiển thị màu đen.
           </div>
         </div>
       )}
