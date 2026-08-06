@@ -66,8 +66,20 @@ class LiveScreenRequest(BaseModel):
     self_view: Optional[bool] = Field(
         False,
         description="Admin đang xem CHÍNH máy này (trình duyệt truy cập qua IP trùng "
-                    "IP máy Client) — Client sẽ che toàn bộ cửa sổ trình duyệt trong "
-                    "frame Live Screen để chống đệ quy feedback loop.",
+                    "IP máy Client) — Client sẽ che vùng khung xem Live Screen để "
+                    "chống đệ quy feedback loop.",
+    )
+    video_rect: Optional[Dict[str, int]] = Field(
+        None,
+        description="Toạ độ khung xem Live Screen tính bằng CSS px, tương đối góc "
+                    "trái CỬA SỔ trình duyệt Web App ({x, y, w, h}). Dùng khi "
+                    "self_view=True để Client chỉ che ĐÚNG vùng khung xem thay vì "
+                    "che toàn bộ cửa sổ trình duyệt (tránh màn hình bị đen hết).",
+    )
+    dpr: Optional[float] = Field(
+        1.0,
+        description="devicePixelRatio của trình duyệt, dùng để quy đổi CSS px sang "
+                    "pixel màn hình vật lý khi che vùng khung xem self-view.",
     )
 
 
@@ -270,6 +282,11 @@ async def control_live_screen(
     """
     msg_type = _resolve_type(_LIVESCREEN_ACTION_TYPE, req.action)
     payload = {"fps": req.fps or 10, "self_view": bool(req.self_view)} if req.action == "start" else {}
+    # Khi self-view, chuyển tiếp toạ độ khung xem + dpr để Client che đúng vùng
+    # khung xem (thay vì toàn bộ cửa sổ trình duyệt → tránh màn hình đen hết).
+    if req.action == "start" and req.self_view:
+        payload["video_rect"] = req.video_rect
+        payload["dpr"] = float(req.dpr or 1.0)
     # screen.live.start nằm trong Sensitive Feature List -> Gateway có thể chờ Permission Confirmation
     timeout = settings.SENSITIVE_COMMAND_TIMEOUT_SECONDS if req.action == "start" else None
     return await dispatch_command_and_log(db, current_user, req.machine_id, msg_type, payload, timeout=timeout)
@@ -301,20 +318,18 @@ async def control_file_action(
 ):
     """
     file.list / file.download. Chỉ thao tác trong sandbox folder (theo security_design.md).
-    *Yêu cầu:* file.list / file.download nằm trong Sensitive Feature List - Gateway
-    sẽ chặn lại và chờ Permission Confirmation từ End User trước khi forward.
+    *Yêu cầu:* file.download nằm trong Sensitive Feature List - Gateway sẽ chặn lại
+    và chờ Permission Confirmation từ End User trước khi forward. file.list chỉ là
+    duyệt thư mục (KHÔNG nhạy cảm) nên được forward ngay, không cần xin quyền.
     """
     msg_type = _resolve_type(_FILE_ACTION_TYPE, req.action)
     payload = {"path": req.path or "C:\\AgentSandbox\\"}
-    # file.* nằm trong Sensitive Feature List -> Gateway có thể chờ Permission
-    # Confirmation tối đa PERMISSION_TIMEOUT (30s) trước khi forward -> cần timeout
-    # dài hơn để Backend không báo TIMEOUT trước khi Gateway giải quyết permission.
     if req.action == "download":
         # file.download: consent (30s) + file I/O (có thể tới 50MB) -> 60s an toàn
         file_timeout = 60
     else:
-        # file.list: consent (30s) + quick listing -> dùng SENSITIVE_COMMAND_TIMEOUT_SECONDS
-        file_timeout = settings.SENSITIVE_COMMAND_TIMEOUT_SECONDS
+        # file.list: chỉ duyệt thư mục, không cần consent -> dùng timeout thường
+        file_timeout = None
     return await dispatch_command_and_log(db, current_user, req.machine_id, msg_type, payload, timeout=file_timeout)
 
 

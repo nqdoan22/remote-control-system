@@ -48,7 +48,7 @@ REST endpoints:
 - `POST /api/v1/modules/webcam`
 - `POST /api/v1/modules/power`
 
-> ⚠️ Frontend hiện gọi thêm `POST /api/v1/auth/change-password` và `GET /api/v1/audit-logs` (xem `frontend/src/services/api.js`), nhưng backend **chưa có router nào xử lý 2 endpoint này** — gọi tới sẽ trả lỗi 404. Đây là API contract chưa khớp giữa 2 phía, cần bổ sung route ở backend hoặc gỡ lời gọi ở frontend.
+> ⚠️ Frontend hiện gọi thêm `POST /api/v1/auth/change-password` (xem `frontend/src/services/api.js`), nhưng backend **chưa có router nào xử lý endpoint này** — gọi tới sẽ trả lỗi 404. Đây là API contract chưa khớp giữa 2 phía, cần bổ sung route ở backend hoặc gỡ lời gọi ở frontend.
 
 ### Tính năng giao diện
 

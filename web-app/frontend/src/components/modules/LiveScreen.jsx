@@ -21,6 +21,16 @@ const LiveScreen = ({ selectedMachine, lastMessage }) => {
   const lastFpsCalcTimeRef = useRef(Date.now());
   const isStreamingRef = useRef(false); // đọc được giá trị mới nhất trong cleanup unmount
 
+  // Ref tới khung hiển thị stream (videoCanvasWrapper) — dùng để đo toạ độ vùng
+  // khung xem khi self-view, giúp Client che đúng vùng này trên màn hình.
+  const previewRef = useRef(null);
+  // Toạ độ khung xem đã gửi cho Client (để phát hiện khi cửa sổ đổi kích thước).
+  const videoRectRef = useRef(null);
+  const [showResizeNote, setShowResizeNote] = useState(false);
+  // Độ lệch viền chrome trình duyệt (title bar/tab/address bar) tính bằng CSS px,
+  // lấy chính xác từ sự kiện click thật (e.screenX/Y - e.clientX/Y).
+  const chromeOffsetRef = useRef(null);
+
   // ⚠️ Phát hiện Admin đang xem chính máy Client. Trường hợp này frame chụp lại
   // bao gồm chính cửa sổ trình duyệt đang hiển thị stream → hiệu ứng gương lặp
   // vô hạn (feedback loop / "đệ quy"). Client sẽ được báo selfView để che toàn bộ
@@ -34,11 +44,57 @@ const LiveScreen = ({ selectedMachine, lastMessage }) => {
     return host === selectedMachine.ipAddress || host === 'localhost' || host === '127.0.0.1';
   }, [selectedMachine]);
 
+  // Đo độ lệch giữa góc trái CỬA SỔ trình duyệt và góc trái viewport (viền
+  // chrome: title bar, tab, address bar...) từ sự kiện click thật của Admin.
+  // window.screenX/Y và event.screenX/Y đều tính theo CSS px nên hiệu của
+  // chúng cho ta đúng toạ độ khung xem tương đối cửa sổ — độc lập với việc
+  // di chuyển/phóng to cửa sổ trình duyệt.
+  const captureChromeOffset = (e) => {
+    if (!e) return;
+    try {
+      chromeOffsetRef.current = {
+        x: (e.screenX - e.clientX) - window.screenX,
+        y: (e.screenY - e.clientY) - window.screenY,
+      };
+    } catch (_) { /* bỏ qua nếu không lấy được */ }
+  };
+
+  const getChromeOffset = () => {
+    if (chromeOffsetRef.current) return chromeOffsetRef.current;
+    // Fallback ước lượng khi chưa bắt được click (hiếm khi xảy ra)
+    return {
+      x: Math.round((window.outerWidth - window.innerWidth) / 2),
+      y: Math.round(window.outerHeight - window.innerHeight),
+    };
+  };
+
+  // Đo toạ độ khung xem Live Screen (CSS px) TƯƠNG ĐỐI GÓC TRÁI CỬA SỔ trình
+  // duyệt. Client sẽ dùng toạ độ này (nhân với devicePixelRatio) để chỉ che
+  // đúng vùng khung xem trên màn hình — phần còn lại vẫn hiển thị bình thường.
+  const getPreviewWindowRect = () => {
+    const el = previewRef.current;
+    if (!el) return null;
+    try {
+      const r = el.getBoundingClientRect();
+      const co = getChromeOffset();
+      return {
+        x: Math.round(r.left + co.x),
+        y: Math.round(r.top + co.y),
+        w: Math.round(r.width),
+        h: Math.round(r.height),
+      };
+    } catch (_) {
+      return null;
+    }
+  };
+
   const stopStreaming = async (silent = false) => {
     setIsStreaming(false);
     isStreamingRef.current = false;
     setLoading(false);
     setRealtimeFps(0);
+    setShowResizeNote(false);
+    videoRectRef.current = null;
     if (!selectedMachine) return;
     try {
       await controlLiveScreenApi(selectedMachine.machineId, 'stop');
@@ -73,12 +129,34 @@ const LiveScreen = ({ selectedMachine, lastMessage }) => {
     }
   }, [lastMessage, isStreaming]);
 
-  const startStreaming = async (retry = true) => {
+  // Khi self-view: nếu cửa sổ trình duyệt đổi kích thước thì toạ độ khung xem đã
+  // gửi cho Client bị lệch → nhắc Admin tắt/bật lại để vùng che khớp trở lại.
+  useEffect(() => {
+    if (!isSelfView || !isStreaming) return;
+    const handleResize = () => {
+      const s = videoRectRef.current;
+      const r = getPreviewWindowRect();
+      if (!s || !r) return;
+      const diff = Math.abs(r.x - s.x) + Math.abs(r.y - s.y) + Math.abs(r.w - s.w) + Math.abs(r.h - s.h);
+      if (diff > 8) setShowResizeNote(true);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [isSelfView, isStreaming]);
+
+  const startStreaming = async (retry = true, clickEvent = null) => {
     if (!selectedMachine) return;
+    captureChromeOffset(clickEvent);
     setLoading(true);
     try {
+      // Khi self-view: gửi kèm toạ độ khung xem + dpr để Client chỉ che đúng
+      // vùng khung xem (không còn đen toàn bộ màn hình khi cửa sổ phóng to).
+      const videoRect = isSelfView ? getPreviewWindowRect() : null;
+      const dpr = isSelfView ? (window.devicePixelRatio || 1) : 1;
+      videoRectRef.current = videoRect;
+      setShowResizeNote(false);
       // Gateway sẽ chặn lại chờ Permission Confirmation (tối đa 30s) trước khi trả response
-      const res = await controlLiveScreenApi(selectedMachine.machineId, 'start', fps, isSelfView);
+      const res = await controlLiveScreenApi(selectedMachine.machineId, 'start', fps, isSelfView, { videoRect, dpr });
       setLoading(false);
       if (isWsError(res)) {
         const code = res.payload?.code;
@@ -110,10 +188,18 @@ const LiveScreen = ({ selectedMachine, lastMessage }) => {
           <span style={{ fontSize: '1.2rem', marginRight: '8px' }}>🪞</span>
           <div>
             <b>Bạn đang xem chính máy này</b> (trình duyệt đang truy cập qua IP{' '}
-            {selectedMachine?.ipAddress}). Client sẽ <b>che toàn bộ cửa sổ trình duyệt</b>{' '}
-            trong stream (kể cả khi bạn mở tab/trang web khác) để tránh hiệu ứng gương
-            lặp vô hạn (feedback loop) — vùng đó hiển thị màu đen.
+            {selectedMachine?.ipAddress}). Để tránh hiệu ứng gương lặp vô hạn
+            (feedback loop), Client sẽ che <b>đúng vùng cửa sổ Web App</b> trong
+            stream (hiển thị màu đen) — phần còn lại của màn hình vẫn hiển thị
+            bình thường. Giữ zoom trình duyệt ở mức 100% để vùng che chính xác nhất.
           </div>
+        </div>
+      )}
+
+      {showResizeNote && (
+        <div style={styles.resizeNote}>
+          ⚠️ Cửa sổ trình duyệt đã đổi kích thước — hãy <b>Dừng rồi Bắt Đầu lại</b>{' '}
+          để vùng che khớp với khung xem mới.
         </div>
       )}
 
@@ -121,7 +207,7 @@ const LiveScreen = ({ selectedMachine, lastMessage }) => {
         <div style={styles.controlsGroup}>
           {!isStreaming ? (
             <button
-              onClick={startStreaming}
+              onClick={(e) => startStreaming(true, e)}
               disabled={loading}
               style={styles.btnStart}
             >
@@ -156,7 +242,7 @@ const LiveScreen = ({ selectedMachine, lastMessage }) => {
         )}
       </div>
 
-      <div style={styles.videoCanvasWrapper}>
+      <div ref={previewRef} style={styles.videoCanvasWrapper}>
         {loading && (
           <div style={styles.statusBox}>
             <div style={{ fontSize: '2.5rem' }}>⏳</div>
@@ -173,11 +259,16 @@ const LiveScreen = ({ selectedMachine, lastMessage }) => {
         )}
 
         {isStreaming && currentFrame && (
-          <img
-            src={currentFrame}
-            alt="Live Screen Stream"
-            style={styles.streamImage}
-          />
+          <div style={styles.streamFrameWrap}>
+            <img
+              src={currentFrame}
+              alt="Live Screen Stream"
+              style={styles.streamImage}
+            />
+            {isSelfView && (
+              <span style={styles.selfViewBadge}>🪞 SELF-VIEW</span>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -187,6 +278,7 @@ const LiveScreen = ({ selectedMachine, lastMessage }) => {
 const styles = {
   container: { display: 'flex', flexDirection: 'column', height: '100%', gap: '12px' },
   selfViewWarning: { display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: '#451a03', border: '1px solid #f59e0b', color: '#fde68a', padding: '10px 14px', borderRadius: '8px', fontSize: '0.9rem', lineHeight: 1.5 },
+  resizeNote: { backgroundColor: '#1e3a8a', border: '1px solid #3b82f6', color: '#bfdbfe', padding: '8px 14px', borderRadius: '8px', fontSize: '0.85rem' },
   topBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1e293b', padding: '12px 16px', borderRadius: '8px', border: '1px solid #334155' },
   controlsGroup: { display: 'flex', alignItems: 'center', gap: '16px' },
   btnStart: { padding: '8px 16px', backgroundColor: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' },
@@ -195,10 +287,12 @@ const styles = {
   selectInput: { padding: '6px 10px', backgroundColor: '#0f172a', color: '#fff', border: '1px solid #475569', borderRadius: '4px' },
   streamStats: { display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.9rem', color: '#f8fafc' },
   liveIndicator: { backgroundColor: '#b91c1c', color: '#fff', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold' },
-  videoCanvasWrapper: { flex: 1, backgroundColor: '#000', border: '1px solid #334155', borderRadius: '8px', display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  videoCanvasWrapper: { flex: 1, backgroundColor: '#000', border: '1px solid #334155', borderRadius: '8px', display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', position: 'relative' },
+  streamFrameWrap: { position: 'relative', width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' },
   statusBox: { textAlign: 'center', color: '#f8fafc' },
   placeholder: { textAlign: 'center', color: '#64748b' },
-  streamImage: { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }
+  streamImage: { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' },
+  selfViewBadge: { position: 'absolute', top: '10px', left: '10px', backgroundColor: 'rgba(56,189,248,0.92)', color: '#0f172a', padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 'bold', boxShadow: '0 2px 6px rgba(0,0,0,0.4)', zIndex: 2 },
 };
 
 export default LiveScreen;

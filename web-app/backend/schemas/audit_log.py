@@ -9,10 +9,10 @@ ARCHITECTURE ROLE:
 ===============================================================================
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, List
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 
 class AuditAction(str, Enum):
@@ -75,23 +75,46 @@ class AuditLogResponse(AuditLogBase):
     [PATTERN - RESPONSE SCHEMA]
     Sử dụng khi EVENT XEM LỊCH SỬ DIỄN RA: Trả dữ liệu từ CSDL ra màn hình 
     Audit Log trên Frontend ReactJS.
+
+    LƯU Ý: Các trường phải khớp 1-1 với cột trong ORM Model AuditLog
+    (db/models.py) để ConfigDict(from_attributes=True) đọc được:
+    - operator_username (cột) <-> admin_username (cũ - KHÔNG tồn tại trong model)
+    - timestamp (cột)      <-> created_at (cũ - KHÔNG tồn tại trong model)
+    - action được lưu dưới dạng message type chuẩn theo api_contract.md
+      (VD: "application.list", "power.lock") nên khai báo là str thay vì enum.
     """
     id: int = Field(
         ..., 
         description="ID tự tăng (Primary Key) của dòng nhật ký trong CSDL."
     )
-    admin_username: str = Field(
+    operator_username: str = Field(
         ..., 
         description="Tên Admin đã thực hiện thao tác."
     )
-    ip_address: Optional[str] = Field(
-        None, 
-        description="IP của Admin khi thao tác."
+    action: str = Field(
+        ...,
+        description="Loại hành động (message type chuẩn theo api_contract.md)."
     )
-    created_at: datetime = Field(
+    status: str = Field(
+        ...,
+        description="Kết quả thực hiện lệnh: success / failed / pending."
+    )
+    timestamp: datetime = Field(
         ..., 
         description="Thời điểm chính xác nhật ký được ghi nhận."
     )
+
+    # SQLite KHÔNG lưu múi giờ (timezone) -> khi đọc từ DB, datetime bị trả về dạng
+    # NAIVE (không có tzinfo), dù lúc GHI code dùng datetime.now(timezone.utc).
+    # Nếu không gắn lại tzinfo, JSON trả về sẽ không có hậu tố 'Z'/+00:00, khiến
+    # JS 'new Date(...)' hiểu nhầm là giờ local (Ví dụ: giờ UTC 14:51 sẽ hiện 14:51
+    # thay vì 21:51 giờ Việt Nam). Validator này đảm bảo luôn đánh dấu là UTC.
+    @field_validator("timestamp", mode="before")
+    @classmethod
+    def ensure_utc(cls, v):
+        if isinstance(v, datetime) and v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v
 
     # Đọc trực tiếp từ SQLAlchemy ORM Model
     model_config = ConfigDict(from_attributes=True)

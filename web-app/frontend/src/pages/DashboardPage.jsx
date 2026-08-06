@@ -226,7 +226,7 @@ const DashboardPage = () => {
           <tbody>
             {auditLogs.map((log) => (
               <tr key={log.id} style={styles.tr}>
-                <td style={styles.td}>{new Date(log.created_at).toLocaleString('vi-VN')}</td>
+                <td style={styles.td}>{new Date(log.timestamp).toLocaleString('vi-VN')}</td>
                 <td style={styles.td}><strong>{log.action}</strong></td>
                 <td style={styles.td}>{log.target_machine_id || 'System'}</td>
                 <td style={styles.td}>{JSON.stringify(log.details || {})}</td>

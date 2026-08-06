@@ -17,7 +17,16 @@ GHI CHÚ ỔN ĐỊNH (LiveScreen instability fix):
   - Giải pháp: vòng lặp chụp chạy trên một threading.Thread riêng (daemon).
     Event loop của GatewayService luôn rảnh để nhận lệnh điều khiển tức thì,
     stop/start/restart luôn hoạt động tin cậy.
-===============================================================================
+
+CHỐNG ĐỆ QUY KHI SELF-VIEW (Admin xem chính máy này) — BẢN NÂNG CẤP:
+  - Trước đây self-view che TOÀN BỘ cửa sổ trình duyệt (màu đen) nên khi cửa sổ
+    phóng to thì gần như CẢ MÀN HÌNH bị đen, Live Screen trở nên vô dụng.
+  - Hiện tại: Web App gửi kèm `video_rect` (toạ độ khung xem Live Screen, CSS px,
+    tính tương đối góc trái CỬA SỔ trình duyệt) + `dpr` (devicePixelRatio). Client
+    chỉ che ĐÚNG vùng khung xem đó trên màn hình — phần còn lại của màn hình vẫn
+    hiển thị bình thường. Nếu thiếu toạ độ hợp lệ (payload cũ / lỗi) sẽ quay về
+    phương án cũ: che toàn bộ trình duyệt để đảm bảo không đệ quy.
+================================================================================
 """
 
 import base64
@@ -174,6 +183,71 @@ def _mask_window_rects(img: "Image.Image", monitor_rect: dict, window_rects: Lis
             draw.rectangle([x0, y0, x1, y1], fill=(13, 13, 18))
 
 
+def _build_self_view_rects(
+    ui_keyword: str,
+    video_rect: Optional[dict] = None,
+    dpr: float = 1.0,
+) -> List[Tuple[int, int, int, int]]:
+    """
+    Dựng danh sách vùng cần che khi Admin xem CHÍNH máy này (self-view).
+
+    Nếu có `video_rect` hợp lệ (Web App gửi kèm), chỉ che ĐÚNG vùng khung xem
+    Live Screen nằm trong các cửa sổ Web App — phần còn lại của màn hình vẫn
+    hiển thị bình thường (tránh màn hình bị đen toàn bộ khi cửa sổ phóng to).
+
+    `video_rect` = {x, y, w, h} tính bằng CSS px, tương đối góc trái CỬA SỔ
+    trình duyệt (đã cộng bù viền chrome từ phía Web App). Quy đổi sang pixel
+    màn hình vật lý bằng `dpr` (devicePixelRatio).
+
+    Nếu không có `video_rect` hợp lệ → fallback an toàn: che toàn bộ cửa sổ
+    Web App + mọi cửa sổ trình duyệt như phương án cũ.
+
+    Returns:
+        List[(left, top, right, bottom)] — toạ độ màn hình ảo (pixel vật lý).
+    """
+    app_rects = _enum_title_rects(ui_keyword, exclude_pid=os.getpid())
+
+    if isinstance(video_rect, dict):
+        try:
+            vx = float(video_rect.get("x", 0))
+            vy = float(video_rect.get("y", 0))
+            vw = float(video_rect.get("w", 0))
+            vh = float(video_rect.get("h", 0))
+        except (TypeError, ValueError):
+            vx = vy = vw = vh = 0.0
+
+        if vw > 0 and vh > 0 and dpr > 0:
+            # Phần viền dôi ra 4px (pixel vật lý) để bù sai số làm tròn/viền ảnh
+            margin = int(round(4 * dpr))
+            x0 = int(round(vx * dpr)) - margin
+            y0 = int(round(vy * dpr)) - margin
+            x1 = int(round((vx + vw) * dpr)) + margin
+            y1 = int(round((vy + vh) * dpr)) + margin
+
+            rects: List[Tuple[int, int, int, int]] = []
+            for (l, t, r, b) in app_rects:
+                win_w = r - l
+                win_h = b - t
+                # Bỏ qua cửa sổ quá nhỏ so với vị trí khung xem (không phải cửa
+                # sổ đang hiển thị Live Screen). Không bắt buộc cửa sổ phải chứa
+                # trọn khung xem vì margin có thể làm khung xem rộng hơn cửa sổ.
+                if x0 >= win_w or y0 >= win_h:
+                    continue
+                mask_l = l + max(0, x0)
+                mask_t = t + max(0, y0)
+                mask_r = min(r, l + max(x1, x0))
+                mask_b = min(b, t + max(y1, y0))
+                if mask_r > mask_l and mask_b > mask_t:
+                    rects.append((mask_l, mask_t, mask_r, mask_b))
+            if rects:
+                return rects
+
+    # Fallback: không có toạ độ chính xác → che toàn bộ trình duyệt (an toàn tuyệt đối)
+    fallback = list(_enum_title_rects(ui_keyword, exclude_pid=os.getpid()))
+    fallback.extend(_enum_browser_rects(exclude_pid=os.getpid()))
+    return fallback
+
+
 class LiveScreenStreamer:
     """
     Class quản lý trạng thái Bật/Tắt luồng Stream Màn hình.
@@ -193,6 +267,8 @@ class LiveScreenStreamer:
         monitor_index: int = 0,
         fps: Optional[int] = None,
         mask_browser_windows: bool = False,
+        video_rect: Optional[dict] = None,
+        dpr: float = 1.0,
     ):
         """
         Bắt đầu luồng Stream màn hình trên một worker thread.
@@ -211,8 +287,12 @@ class LiveScreenStreamer:
             fps: Số khung hình/giây do Web App yêu cầu (payload.fps).
                  None = dùng settings.SCREEN_FPS.
             mask_browser_windows: True khi Admin đang xem CHÍNH máy này (self-view)
-                 → che toàn bộ cửa sổ trình duyệt (theo tên tiến trình) để cắt vòng
-                 lặp feedback loop dù trình duyệt đang mở trang web/tab bất kỳ.
+                 → che vùng khung xem Live Screen để cắt vòng lặp feedback loop.
+            video_rect: {x, y, w, h} tính bằng CSS px, tương đối góc trái CỬA SỔ
+                 trình duyệt Web App (Web App gửi kèm khi self-view). Client chỉ
+                 che ĐÚNG vùng này thay vì toàn bộ cửa sổ trình duyệt. None/không
+                 hợp lệ → fallback che toàn bộ trình duyệt (phương án cũ).
+            dpr: devicePixelRatio của trình duyệt để quy đổi CSS px → pixel vật lý.
         """
         if self.is_streaming:
             logger.warning("⚠️ Luồng Live Screen cũ vẫn đang chạy — tự động dừng rồi khởi động lại.")
@@ -221,14 +301,15 @@ class LiveScreenStreamer:
         effective_fps = fps or settings.SCREEN_FPS
         logger.info(
             f"📹 [LIVE SCREEN] Khởi chạy luồng stream màn hình "
-            f"(FPS: {effective_fps}, mask_browsers={mask_browser_windows})..."
+            f"(FPS: {effective_fps}, self_view={mask_browser_windows}, "
+            f"video_rect={video_rect}, dpr={dpr})..."
         )
 
         self.is_streaming = True
         self._stop_event = threading.Event()
         self._worker = threading.Thread(
             target=self._capture_loop,
-            args=(send_frame_callback, monitor_index, effective_fps, self._stop_event, mask_browser_windows),
+            args=(send_frame_callback, monitor_index, effective_fps, self._stop_event, mask_browser_windows, video_rect, dpr),
             name="LiveScreenCaptureThread",
             daemon=True,
         )
@@ -261,6 +342,8 @@ class LiveScreenStreamer:
         fps: int,
         stop_event: threading.Event,
         mask_browser_windows: bool = False,
+        video_rect: Optional[dict] = None,
+        dpr: float = 1.0,
     ):
         """
         Vòng lặp chụp và gửi khung hình theo FPS — chạy trên worker thread.
@@ -270,9 +353,12 @@ class LiveScreenStreamer:
         """
         frame_delay = 1.0 / max(1, fps)
 
-        # Chống đệ quy (feedback loop) khi Admin xem chính máy này: luôn che các
-        # cửa sổ Web App (khớp tiêu đề); nếu self-view thì che LUÔN mọi cửa sổ
-        # trình duyệt theo tên tiến trình — dù đang mở trang web/tab bất kỳ.
+        # Chống đệ quy (feedback loop) khi Admin xem chính máy này:
+        #  - Bình thường: luôn che các cửa sổ Web App (khớp tiêu đề) để ẩn bảng
+        #    điều khiển khỏi stream của máy ở xa (privacy).
+        #  - Self-view: nếu có `video_rect` chính xác từ Web App thì chỉ che đúng
+        #    vùng khung xem Live Screen (không che cả cửa sổ → màn hình không đen);
+        #    nếu thiếu toạ độ thì fallback che toàn bộ trình duyệt như cũ.
         exclude_own_ui = bool(settings.LIVE_SCREEN_EXCLUDE_OWN_UI)
         ui_keyword = str(settings.LIVE_SCREEN_UI_TITLE_KEYWORD)
         excluded_rects: List[Tuple[int, int, int, int]] = []
@@ -293,14 +379,17 @@ class LiveScreenStreamer:
                     sct_img = sct.grab(selected_monitor)
                     img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
 
-                    # 3. Che cửa sổ Web App / trình duyệt (cắt vòng lặp đệ quy)
+                    # 3. Che vùng khung xem Live Screen / cửa sổ Web App
+                    #    (cắt vòng lặp đệ quy)
                     if exclude_own_ui:
                         now = time.monotonic()
                         if now - last_rects_refresh >= _RECTS_REFRESH_INTERVAL:
-                            rects = _enum_title_rects(ui_keyword, exclude_pid=os.getpid())
                             if mask_browser_windows:
-                                rects.extend(_enum_browser_rects(exclude_pid=os.getpid()))
-                            excluded_rects = rects
+                                excluded_rects = _build_self_view_rects(
+                                    ui_keyword, video_rect=video_rect, dpr=dpr
+                                )
+                            else:
+                                excluded_rects = _enum_title_rects(ui_keyword, exclude_pid=os.getpid())
                             last_rects_refresh = now
                         _mask_window_rects(img, selected_monitor, excluded_rects)
 

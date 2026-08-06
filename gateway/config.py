@@ -87,8 +87,10 @@ PERMISSION_TIMEOUT: int = int(os.getenv("PERMISSION_TIMEOUT", "30"))
 
 # Danh sách message types yêu cầu permission confirmation
 # Source of truth: docs/api_contract.md — Sensitive Feature List
-# File Transfer (file.list, file.download, file.upload) cũng nằm trong danh sách
-# vì chúng có thể đọc/ghi/xóa dữ liệu nhạy cảm trong Sandbox.
+# File Transfer: chỉ file.download và file.upload nằm trong danh sách (ghi/đọc dữ
+# liệu thực sự nhạy cảm). file.list (duyệt thư mục) KHÔNG còn cần xin quyền —
+# trước đây nó khiến Admin bị spam 2 popup liên tiếp mỗi lần mở module File
+# Transfer (React StrictMode double-invoke useEffect) dù chỉ mới xem thư mục.
 SENSITIVE_MESSAGE_TYPES: frozenset[str] = frozenset({
     "screen.screenshot",
     "screen.live.start",
@@ -99,7 +101,6 @@ SENSITIVE_MESSAGE_TYPES: frozenset[str] = frozenset({
     "power.shutdown",
     "power.sleep",
     # File Transfer — yêu cầu Explicit Consent theo Security Design (Nguyên tắc #4)
-    "file.list",
     "file.download",
     "file.upload",
 })

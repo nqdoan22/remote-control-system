@@ -35,13 +35,25 @@ const FileTransfer = ({ selectedMachine }) => {
   useEffect(() => {
     sandboxRootRef.current = DEFAULT_SANDBOX_ROOT;
     setCurrentPath(DEFAULT_SANDBOX_ROOT);
+    fetchDirectoryContent(DEFAULT_SANDBOX_ROOT);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [machineId]);
 
-  useEffect(() => {
-    fetchDirectoryContent(currentPath);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [machineId, currentPath]);
+  // Điều hướng có kiểm soát: chặn đường dẫn ngoài Sandbox (không gửi lệnh)
+  // và quay về gốc Sandbox nếu bị Client từ chối vì lý do INVALID_PATH.
+  const navigateTo = (path) => {
+    const root = norm(sandboxRootRef.current);
+    const target = norm(path);
+    const insideSandbox = target === root || target.startsWith(root + '\\');
+    if (!insideSandbox) {
+      alert('Đường dẫn nằm ngoài phạm vi Sandbox. Đã quay lại gốc Sandbox.');
+      setCurrentPath(sandboxRootRef.current);
+      fetchDirectoryContent(sandboxRootRef.current);
+      return;
+    }
+    setCurrentPath(path);
+    fetchDirectoryContent(path);
+  };
 
   // Lấy danh sách File/Thư mục (file.list)
   const fetchDirectoryContent = async (path) => {
@@ -50,7 +62,15 @@ const FileTransfer = ({ selectedMachine }) => {
     try {
       const res = await fileActionApi(selectedMachine.machineId, 'list', path);
       if (isWsError(res)) {
-        alert('Không thể mở thư mục: ' + getWsErrorMessage(res));
+        const code = res.payload?.code;
+        const msg = getWsErrorMessage(res);
+        // Client từ chối (đường dẫn ngoài Sandbox / không hợp lệ) -> quay về gốc
+        if (code === 'INVALID_PATH') {
+          alert(msg + ' Đã quay lại gốc Sandbox.');
+          navigateTo(sandboxRootRef.current);
+          return;
+        }
+        alert('Không thể mở thư mục: ' + msg);
       } else {
         // payload.data: { rootPath, entries: [{ name, type, sizeBytes, modifiedAt }] }
         const data = getWsData(res);
@@ -60,8 +80,9 @@ const FileTransfer = ({ selectedMachine }) => {
           sandboxRootRef.current = String(root).replace(/[\\/]+$/, '') + '\\';
           // Tự sửa đường dẫn mặc định nếu máy này đang dùng sandbox khác
           if (path === DEFAULT_SANDBOX_ROOT && norm(root) !== norm(DEFAULT_SANDBOX_ROOT)) {
-            setCurrentPath(String(root).replace(/[\\/]+$/, '') + '\\');
-            return; // effect chạy lại với currentPath mới
+            const actualRoot = String(root).replace(/[\\/]+$/, '') + '\\';
+            setCurrentPath(actualRoot);
+            return fetchDirectoryContent(actualRoot);
           }
         }
         setFileList(data.entries || []);
@@ -78,7 +99,7 @@ const FileTransfer = ({ selectedMachine }) => {
       const newPath = currentPath.endsWith('\\')
         ? `${currentPath}${item.name}`
         : `${currentPath}\\${item.name}`;
-      setCurrentPath(newPath);
+      navigateTo(newPath);
     }
   };
 
@@ -86,13 +107,11 @@ const FileTransfer = ({ selectedMachine }) => {
     const root = norm(sandboxRootRef.current);
     const parent = norm(parentOf(currentPath));
     // Không cho đi lên quá gốc Sandbox
-    if (parent === root) {
-      setCurrentPath(sandboxRootRef.current);
+    if (parent === root || !parent.startsWith(root + '\\')) {
+      navigateTo(sandboxRootRef.current);
       return;
     }
-    if (parent.startsWith(root + '\\')) {
-      setCurrentPath(parentOf(currentPath));
-    }
+    navigateTo(parentOf(currentPath));
   };
 
   // 📥 TẢI FILE TỪ CLIENT VỀ ADMIN (file.download - single shot, tối đa 50MB)
@@ -193,7 +212,7 @@ const FileTransfer = ({ selectedMachine }) => {
           type="text"
           value={currentPath}
           onChange={(e) => setCurrentPath(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && fetchDirectoryContent(currentPath)}
+          onKeyDown={(e) => e.key === 'Enter' && navigateTo(currentPath)}
           style={styles.pathInput}
         />
 

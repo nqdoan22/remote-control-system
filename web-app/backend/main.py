@@ -20,7 +20,7 @@ from init_db import init_db
 from core.gateway_client import gateway_client
 
 # Import các API Routers
-from routers import auth, machines, modules, ws
+from routers import auth, machines, modules, audit_log, ws
 
 # Thiết lập ghi Log hệ thống
 logging.basicConfig(
@@ -93,6 +93,7 @@ API_PREFIX = "/api/v1"
 app.include_router(auth.router, prefix=API_PREFIX)
 app.include_router(machines.router, prefix=API_PREFIX)
 app.include_router(modules.router, prefix=API_PREFIX)
+app.include_router(audit_log.router, prefix=API_PREFIX)
 
 # WebSocket Endpoint (KHÔNG có prefix - bắt buộc đúng đường dẫn /ws)
 app.include_router(ws.router)

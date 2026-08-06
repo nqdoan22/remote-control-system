@@ -33,7 +33,6 @@ Tài liệu bao gồm:
 | Power — Restart | `power.restart`       |
 | Power — Shutdown| `power.shutdown`      |
 | Power — Sleep   | `power.sleep`         |
-| File — List     | `file.list`           |
 | File — Download | `file.download`       |
 | File — Upload   | `file.upload`         |
 
@@ -513,7 +512,10 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 {
   "type": "screen.live.start",
   "payload": {
-    "fps": 10
+    "fps": 10,
+    "self_view": false,
+    "video_rect": null,
+    "dpr": 1.0
   }
 }
 
@@ -522,6 +524,9 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 | Field | Value mặc định | Mô tả |
 | --- | --- | --- |
 | `fps` | 10 | Số frame mỗi giây, tối đa 30 |
+| `self_view` | false | `true` khi Admin đang xem CHÍNH máy này (trình duyệt truy cập qua IP trùng IP máy Client). |
+| `video_rect` | `null` | Toạ độ khung xem Live Screen `{x, y, w, h}` tính bằng CSS px, tương đối góc trái CỬA SỔ trình duyệt. Khi `self_view=true` và có `video_rect`, Client chỉ che ĐÚNG vùng khung xem đó trong frame (tránh đen toàn bộ màn hình); nếu không có sẽ fallback che toàn bộ cửa sổ trình duyệt. |
+| `dpr` | 1.0 | `devicePixelRatio` của trình duyệt, dùng để quy đổi CSS px → pixel màn hình vật lý khi che vùng khung xem self-view. |
 
 **Client App → Gateway → Web App** (response xác nhận bắt đầu)
 
@@ -698,7 +703,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 > Chỉ được phép thao tác trong **sandbox folder** đã cấu hình (mặc định: `C:\AgentSandbox\`).
 > Mọi nỗ lực truy cập đường dẫn tuyệt đối hoặc dùng `../` nằm ngoài sandbox sẽ bị từ chối với lỗi `INVALID_PATH`.
 >
-> **Chức năng nhạy cảm** — `file.list`, `file.download`, `file.upload` nằm trong **Sensitive Feature List**. Gateway sẽ chặn lệnh và thực hiện **Permission Confirmation** (xem **Permission Confirmation Messages**): gửi `permission.request` xuống Client App, chỉ forward lệnh gốc tới Client khi End User đồng ý. Nếu từ chối → `PERMISSION_DENIED`; hết giờ → `PERMISSION_TIMEOUT`.
+> **Chức năng nhạy cảm** — `file.download`, `file.upload` nằm trong **Sensitive Feature List**. Gateway sẽ chặn lệnh và thực hiện **Permission Confirmation** (xem **Permission Confirmation Messages**): gửi `permission.request` xuống Client App, chỉ forward lệnh gốc tới Client khi End User đồng ý. Nếu từ chối → `PERMISSION_DENIED`; hết giờ → `PERMISSION_TIMEOUT`. Riêng `file.list` (duyệt thư mục) **không** nằm trong danh sách nhạy cảm — chỉ là đọc metadata, được forward ngay không cần xin quyền.
 
 ## file.list
 

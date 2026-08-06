@@ -142,10 +142,20 @@ export const takeScreenshotApi = (machineId) =>
 // sẽ tự hủy request trước khi Backend kịp trả lời.
 const SENSITIVE_COMMAND_TIMEOUT_MS = 40000;
 
-export const controlLiveScreenApi = (machineId, action, fps = 10, selfView = false) =>
+export const controlLiveScreenApi = (machineId, action, fps = 10, selfView = false, options = {}) =>
   api.post(
     '/modules/live-screen',
-    { machine_id: machineId, action, fps, self_view: selfView },
+    {
+      machine_id: machineId,
+      action,
+      fps,
+      self_view: selfView,
+      // options.videoRect: { x, y, w, h } (CSS px, tương đối cửa sổ trình duyệt)
+      // options.dpr: devicePixelRatio — giúp Client che đúng vùng khung xem
+      // Live Screen khi self-view thay vì che toàn bộ cửa sổ trình duyệt.
+      video_rect: options.videoRect || null,
+      dpr: options.dpr || 1,
+    },
     { timeout: SENSITIVE_COMMAND_TIMEOUT_MS }
   );
 

