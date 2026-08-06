@@ -171,12 +171,23 @@ async def dispatch_command_and_log(
         )
 
     # 2. Tạo bản ghi Nhật ký Thao tác (Audit Log)
+    # KHÔNG ghi nội dung nhạy cảm (base64 content của file.upload/download) vào
+    # CSDL: file tối đa 50MB → chuỗi base64 ~67MB/1 dòng. Upload folder phát ra
+    # nhiều file.upload liên tiếp sẽ làm DB phình to, commit chậm và dễ khiến
+    # request bị timeout. Chỉ ghi metadata (path, kích thước) để truy vết.
+    audit_payload = payload
+    if action_type == "file.upload" and isinstance(payload, dict) and payload.get("content"):
+        audit_payload = {
+            **payload,
+            "content": f"[REDACTED - {len(payload['content'])} base64 chars]",
+        }
+
     log_entry = AuditLog(
         operator_username=operator.username,
         action=action_type,
         target_machine_id=machine_id,
         status="pending",
-        details=str(payload),
+        details=str(audit_payload),
         timestamp=datetime.now(timezone.utc)
     )
     db.add(log_entry)

@@ -121,6 +121,10 @@ class MachineRegistry:
         info = self._machines.get(machine_id)
         return info is not None and info.status == "online"
 
+    def get_all_ids(self) -> list[str]:
+        """Trả về danh sách machineId của tất cả machines đã đăng ký."""
+        return list(self._machines.keys())
+
     def get_all(self) -> list[dict]:
         """Trả về danh sách tất cả machines (online + offline) dạng dict."""
         return [info.to_dict() for info in self._machines.values()]

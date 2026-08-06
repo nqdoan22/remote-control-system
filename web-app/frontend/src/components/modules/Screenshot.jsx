@@ -34,8 +34,11 @@ const Screenshot = ({ selectedMachine }) => {
     setLoading(false);
   }, [machineId]);
 
-  const takeScreenshot = async () => {
-    if (!selectedMachine) return;
+  // Chụp ảnh mới từ Client (luôn đi qua popup xin quyền vì screen.screenshot
+  // thuộc Sensitive Feature List). Trả về data URL của ảnh, null nếu thất bại /
+  // Client từ chối / hết giờ.
+  const captureScreenshot = async () => {
+    if (!selectedMachine) return null;
     setLoading(true);
     setConsentStatus('waiting');
 
@@ -57,35 +60,48 @@ const Screenshot = ({ selectedMachine }) => {
           setConsentStatus('');
           alert('Lỗi chụp màn hình: ' + errMsg);
         }
-      } else {
-        const data = getWsData(res); // { image, width, height, timestamp } theo api_contract.md
-        const image = data?.image;
-
-        // Kiểm tra dữ liệu ảnh trước khi tạo data URL. Nếu rỗng/thiếu -> báo lỗi rõ
-        // ràng thay vì img src hỏng ('...base64,undefined') khiến trình duyệt chỉ hiện
-        // đúng chữ alt "Client Screenshot" (bug "chỉ cho coi text").
-        if (!image || typeof image !== 'string' || image.length === 0) {
-          setConsentStatus('');
-          alert('Lỗi chụp màn hình: Phản hồi không chứa dữ liệu ảnh (image rỗng).');
-        } else {
-          setConsentStatus('approved');
-          setImageData(`data:image/jpeg;base64,${image}`);
-          setCapturedAt(new Date().toLocaleTimeString('vi-VN'));
-        }
+        return null;
       }
+
+      const data = getWsData(res); // { image, width, height, timestamp } theo api_contract.md
+      const image = data?.image;
+
+      // Kiểm tra dữ liệu ảnh trước khi tạo data URL. Nếu rỗng/thiếu -> báo lỗi rõ
+      // ràng thay vì img src hỏng ('...base64,undefined') khiến trình duyệt chỉ hiện
+      // đúng chữ alt "Client Screenshot" (bug "chỉ cho coi text").
+      if (!image || typeof image !== 'string' || image.length === 0) {
+        setConsentStatus('');
+        alert('Lỗi chụp màn hình: Phản hồi không chứa dữ liệu ảnh (image rỗng).');
+        return null;
+      }
+
+      const dataUrl = `data:image/jpeg;base64,${image}`;
+      setConsentStatus('approved');
+      setImageData(dataUrl);
+      setCapturedAt(new Date().toLocaleTimeString('vi-VN'));
+      return dataUrl;
     } catch (err) {
       // Lỗi hạ tầng (machine offline, gateway lỗi...) -> HTTPException từ backend
       setConsentStatus('');
       alert('Lỗi chụp màn hình: ' + (err?.detail || 'Không rõ nguyên nhân'));
+      return null;
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDownloadImage = () => {
-    if (!imageData) return;
+  const takeScreenshot = async () => {
+    await captureScreenshot();
+  };
+
+  // 💾 Tải Ảnh = CHỤP LẠI ảnh mới (kèm popup xin quyền trên máy Client) rồi tải về —
+  // KHÔNG dùng ảnh cache cũ. Mọi lần ảnh được lấy về từ Client đều phải được
+  // End User đồng ý trước (theo yêu cầu: mỗi lần tải ảnh đều cần xin quyền).
+  const handleDownloadImage = async () => {
+    const dataUrl = await captureScreenshot();
+    if (!dataUrl) return;
     const link = document.createElement('a');
-    link.href = imageData;
+    link.href = dataUrl;
     link.download = `Screenshot_${selectedMachine?.hostname || selectedMachine?.machineId || 'client'}_${Date.now()}.jpg`;
     document.body.appendChild(link);
     link.click();
@@ -134,7 +150,7 @@ const Screenshot = ({ selectedMachine }) => {
           </button>
 
           {imageData && (
-            <button onClick={handleDownloadImage} style={styles.btnSuccess}>
+            <button onClick={handleDownloadImage} disabled={loading} style={styles.btnSuccess}>
               💾 Tải Ảnh Phân Giải Gốc
             </button>
           )}

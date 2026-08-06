@@ -28,6 +28,23 @@ const FileTransfer = ({ selectedMachine }) => {
   const [loading, setLoading] = useState(false);
   const [transferStatus, setTransferStatus] = useState('');
   const sandboxRootRef = useRef(DEFAULT_SANDBOX_ROOT); // gốc Sandbox thật của máy hiện tại
+  const currentPathRef = useRef(DEFAULT_SANDBOX_ROOT); // luôn giữ đường dẫn MỚI NHẤT để batch upload dùng (tránh stale closure)
+  const folderInputRef = useRef(null);                 // input chọn thư mục (webkitdirectory)
+
+  // Đồng bộ ref mỗi khi currentPath đổi -> upload folder luôn lấy đúng thư mục đang mở.
+  useEffect(() => {
+    currentPathRef.current = currentPath;
+  }, [currentPath]);
+
+  // Đảm bảo thuộc tính webkitdirectory tồn tại trên DOM (cho phép chọn CẢ THƯ MỤC).
+  // Set qua ref để tránh trường hợp React bỏ qua attribute lạ trong một số phiên bản
+  // khiến nút "Tải Thư Mục" chỉ mở được trình chọn file chứ không phải chọn folder.
+  useEffect(() => {
+    if (folderInputRef.current) {
+      folderInputRef.current.setAttribute('webkitdirectory', '');
+      folderInputRef.current.setAttribute('directory', '');
+    }
+  }, []);
 
   // Chỉ reset/tải lại khi ĐỔI MÁY (machineId), tránh gửi lệnh 'file.list' lặp
   // khi selectedMachine bị tạo lại do isConnected (WS) thay đổi.
@@ -35,6 +52,10 @@ const FileTransfer = ({ selectedMachine }) => {
   useEffect(() => {
     sandboxRootRef.current = DEFAULT_SANDBOX_ROOT;
     setCurrentPath(DEFAULT_SANDBOX_ROOT);
+    // Xóa danh sách cũ của máy trước đó NGAY LẬP TỨC: nếu không, khi chuyển máy
+    // mà file.list của máy mới chưa kịp trả về, Admin vẫn thấy thư mục CỦA MÁY
+    // CŨ và bấm tải -> path gửi xuống máy mới không tồn tại -> lỗi FILE_NOT_FOUND.
+    setFileList([]);
     fetchDirectoryContent(DEFAULT_SANDBOX_ROOT);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [machineId]);
@@ -114,32 +135,56 @@ const FileTransfer = ({ selectedMachine }) => {
     navigateTo(parentOf(currentPath));
   };
 
-  // 📥 TẢI FILE TỪ CLIENT VỀ ADMIN (file.download - single shot, tối đa 50MB)
-  const handleDownloadFile = async (fileName) => {
+  // 📥 TẢI FILE/THƯ MỤC TỪ CLIENT VỀ ADMIN (file.download - single shot, tối đa 50MB).
+  // Thư mục được Client nén thành <tên>.zip nên handler này dùng chung cho cả 2 loại.
+  const handleDownloadFile = async (fileName, isDirectory = false) => {
     if (!selectedMachine) return;
-    const fullFilePath = currentPath.endsWith('\\') ? `${currentPath}${fileName}` : `${currentPath}\\${fileName}`;
-    setTransferStatus(`Đang tải file "${fileName}" từ Client...`);
+    const dir = currentPathRef.current;
+    const fullFilePath = dir.endsWith('\\') ? `${dir}${fileName}` : `${dir}\\${fileName}`;
+    setTransferStatus(`Đang tải "${fileName}" từ Client...`);
 
     try {
       const res = await fileActionApi(selectedMachine.machineId, 'download', fullFilePath);
       if (isWsError(res)) {
         setTransferStatus('');
-        alert('Lỗi tải file: ' + getWsErrorMessage(res));
+        const code = res?.payload?.code;
+        // FILE_NOT_FOUND với THƯ MỤC thường do 1 trong 2 nguyên nhân:
+        //   1. Thư mục không tồn tại trên máy Client đang chọn (danh sách cũ).
+        //   2. Client đang chạy PHIÊN BẢN CŨ: dispatcher cũ chỉ gọi download_file
+        //      (tải file đơn), không hỗ trợ nén thư mục thành .zip nên trả đúng
+        //      thông báo này. -> Đưa gợi ý rõ ràng để Admin biết phải cập nhật.
+        if (code === 'FILE_NOT_FOUND' && isDirectory) {
+          alert('Lỗi tải: ' + getWsErrorMessage(res) + ' — Thư mục không tồn tại trên máy Client đang chọn, hoặc Client đang chạy phiên bản cũ chưa hỗ trợ tải thư mục (nén .zip). Hãy cập nhật Client lên phiên bản mới nhất.');
+          return;
+        }
+        alert('Lỗi tải: ' + getWsErrorMessage(res));
         return;
       }
       // payload.data: { filename, content (base64), sizeBytes, mimeType }
       const { filename, content, mimeType } = getWsData(res);
+      const mime = mimeType || 'application/octet-stream';
+
+      // KHÔNG dùng data: URL để tải vì Chrome/Edge giới hạn data URL tải xuống
+      // ~2MB -> file/folder (zip) lớn hơn sẽ bị fail âm thầm dù file nhỏ vẫn tải
+      // được. Giải mã base64 thành Blob rồi dùng URL.createObjectURL (không giới
+      // hạn kích thước, giới hạn còn lại chỉ là 50MB của giao thức).
+      const binary = atob(content);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blobUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
+
       const link = document.createElement('a');
-      link.href = `data:${mimeType || 'application/octet-stream'};base64,${content}`;
+      link.href = blobUrl;
       link.download = filename || fileName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      setTransferStatus('🎉 Tải file hoàn tất!');
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+      setTransferStatus('🎉 Tải về hoàn tất!');
       setTimeout(() => setTransferStatus(''), 3000);
     } catch (err) {
       setTransferStatus('');
-      alert('Lỗi tải file: ' + (err?.detail || 'File có thể vượt quá 50MB hoặc quá thời gian chờ.'));
+      alert('Lỗi tải: ' + (err?.detail || 'Nội dung có thể vượt quá 50MB hoặc quá thời gian chờ.'));
     }
   };
 
@@ -160,6 +205,13 @@ const FileTransfer = ({ selectedMachine }) => {
     let processed = 0;
     let failed = 0;
     let skipped = 0;
+    let stopped = false;
+
+    // Lấy đường dẫn đích MỘT LẦN từ ref (bản mới nhất tại thời điểm bắt đầu),
+    // tránh dùng currentPath cũ trong closure khi React chưa kịp render lại.
+    const targetDir = currentPathRef.current;
+    const joinPath = (rel) =>
+      targetDir.endsWith('\\') ? `${targetDir}${rel}` : `${targetDir}\\${rel}`;
 
     for (const file of files) {
       processed += 1;
@@ -173,14 +225,21 @@ const FileTransfer = ({ selectedMachine }) => {
       const relativePath = file.webkitRelativePath || file.name;
       // Chuẩn hóa dấu phân cách: webkitRelativePath dùng '/', sandbox dùng '\'
       const normalizedRel = relativePath.replace(/\//g, '\\');
-      const destinationPath = currentPath.endsWith('\\')
-        ? `${currentPath}${normalizedRel}`
-        : `${currentPath}\\${normalizedRel}`;
+      const destinationPath = joinPath(normalizedRel);
       setTransferStatus(`Đang tải (${processed}/${total}): ${relativePath}...`);
 
       try {
         const res = await uploadFileApi(selectedMachine.machineId, destinationPath, file);
         if (isWsError(res)) {
+          const code = res?.payload?.code;
+          // End User TỪ CHỐI hoặc HẾT GIỜ xác nhận quyền -> các file còn lại
+          // sẽ lại mở popup xin quyền nên dừng hẳn batch (không spam popup nữa).
+          if (code === 'PERMISSION_DENIED' || code === 'PERMISSION_TIMEOUT') {
+            failed += 1;
+            stopped = true;
+            alert(`Lỗi tải "${relativePath}": ${getWsErrorMessage(res)}. Đã dừng ${total - processed} mục còn lại.`);
+            break;
+          }
           failed += 1;
           alert(`Lỗi tải "${relativePath}": ${getWsErrorMessage(res)}`);
         }
@@ -191,13 +250,15 @@ const FileTransfer = ({ selectedMachine }) => {
     }
 
     const uploaded = processed - skipped - failed;
-    const summary = failed
+    const summary = stopped
+      ? `⚠️ Đã dừng tải: ${uploaded}/${total} mục thành công (${failed} lỗi).`
+      : failed
       ? `⚠️ Đã tải ${uploaded}/${total} mục thành công${skipped ? ` (${skipped} quá 50MB)` : ''}${failed ? ` (${failed} lỗi)` : ''}.`
       : `🎉 Đã tải ${uploaded} file/thư mục lên Client thành công!`;
     setTransferStatus(summary);
     setTimeout(() => {
       setTransferStatus('');
-      fetchDirectoryContent(currentPath);
+      fetchDirectoryContent(targetDir);
     }, 1500);
   };
 
@@ -223,12 +284,12 @@ const FileTransfer = ({ selectedMachine }) => {
 
         <label style={styles.btnUploadFolder}>
           📂 Tải Thư Mục Lên Client
-          <input type="file" webkitdirectory="" onChange={handleUploadSelect} style={{ display: 'none' }} />
+          <input type="file" ref={folderInputRef} webkitdirectory="" directory="" onChange={handleUploadSelect} style={{ display: 'none' }} />
         </label>
       </div>
 
       <div style={styles.sandboxNotice}>
-        🔒 Chỉ được thao tác trong thư mục Sandbox đã cấu hình trên Client (mặc định <code>C:\AgentSandbox\</code>). Kích thước mỗi file tối đa: 50MB. Có thể chọn nhiều file cùng lúc hoặc cả thư mục.
+        🔒 Chỉ được thao tác trong thư mục Sandbox đã cấu hình trên Client (mặc định <code>C:\AgentSandbox\</code>). Kích thước mỗi file tối đa: 50MB. Có thể chọn nhiều file cùng lúc hoặc cả thư mục. Khi tải thư mục về, Client sẽ nén thành file <code>.zip</code> (giới hạn 50MB cho file nén).
       </div>
 
       {transferStatus && (
@@ -264,8 +325,8 @@ const FileTransfer = ({ selectedMachine }) => {
                   <td style={styles.td}>{item.type === 'directory' ? 'Thư mục' : 'Tập tin'}</td>
                   <td style={styles.td}>{item.type === 'directory' ? '--' : `${((item.sizeBytes || 0) / 1024).toFixed(1)} KB`}</td>
                   <td style={styles.td}>
-                    {item.type === 'file' && (
-                      <button onClick={() => handleDownloadFile(item.name)} style={styles.btnDownload}>
+                    {(item.type === 'file' || item.type === 'directory') && (
+                      <button onClick={() => handleDownloadFile(item.name, item.type === 'directory')} style={styles.btnDownload}>
                         📥 Tải Về Admin
                       </button>
                     )}

@@ -163,6 +163,21 @@ class PermissionPopupDialog(QDialog):
 
         self.setLayout(main_layout)
 
+    def showEvent(self, event):
+        """
+        Ngay khi Popup được hiển thị, đánh dấu cửa sổ ở CẤP ĐỘ HỆ ĐIỀU HÀNH là
+        "không bao giờ bị chụp màn hình" (SetWindowDisplayAffinity /
+        WDA_EXCLUDEFROMCAPTURE). Nhờ đó popup cảnh báo KHÔNG BAO GIỜ lọt vào ảnh
+        chụp của Admin dù có xảy ra race timing nào đi nữa — Windows tự thay nó
+        bằng vùng đen trong mọi capture (BitBlt/DWM).
+        """
+        super().showEvent(event)
+        try:
+            from modules.screenshot import exclude_window_from_capture
+            exclude_window_from_capture(int(self.winId()))
+        except Exception:
+            pass
+
     def _start_timer(self):
         """Khởi động QTimer cập nhật thanh thời gian mỗi 100ms."""
         self.ticks_left = self.total_timeout * 10
@@ -197,8 +212,45 @@ class PermissionPopupDialog(QDialog):
         self._resolve_and_close(granted=False)
 
     def _resolve_and_close(self, granted: bool):
-        """Gửi kết quả về PermissionService và đóng cửa sổ Popup."""
-        if self.permission_service:
-            self.permission_service.handle_user_response(self.permission_id, granted)
+        """Gửi kết quả về PermissionService và đóng cửa sổ Popup.
+
+        QUAN TRỌNG: phải đóng/ẩn Popup (cửa sổ cảnh báo) HOÀN TOÀN TRƯỚC khi
+        gọi handle_user_response(). Vì handle_user_response() kích hoạt chuỗi
+        phản hồi: permission.response → Gateway forward lệnh → Client chụp ảnh.
+        Nếu gọi nó trước mà popup vẫn đang hiển thị, ảnh chụp sẽ kịp lấy được
+        cả popup (hiện tượng "màn hình cảnh báo bị chụp lẫn" — nhất là trên máy
+        remote có độ trễ thấp giữa lúc đóng popup và lúc chụp).
+
+        Cửa sổ được ẩn NGAY LẬP TỨC (Win32 ShowWindow SW_HIDE trên native HWND,
+        bỏ qua animation fade của Windows 10) ngay từ dòng đầu tiên — đúng thời
+        điểm End User bấm nút, cửa sổ biến mất khỏi màn hình ngay, không chờ
+        event loop.
+        """
+        # Dừng timer đếm ngược
+        try:
+            self.timer.stop()
+        except Exception:
+            pass
+
+        # 1. Ẩn cửa sổ NGAY LẬP TỨC bằng Qt (ShowWindow SW_HIDE — không animation)
+        try:
+            self.hide()
+        except Exception:
+            pass
+
+        # 2. Chạm trực tiếp native HWND để chắc chắn cửa sổ biến mất tức thì
+        #    khỏi màn hình (SW_HIDE = 0), không phụ thuộc Qt/event loop.
+        try:
+            import ctypes
+            ctypes.windll.user32.ShowWindow(int(self.winId()), 0)  # SW_HIDE = 0
+        except Exception:
+            pass
+
+        # 3. Thoát vòng lặp exec() của Dialog
         self.accept() if granted else self.reject()
         self.close()
+
+        # 4. SAU khi cửa sổ chắc chắn đã biến mất mới kích hoạt chuỗi phản hồi
+        #    (permission.response → Gateway forward → Client chụp ảnh).
+        if self.permission_service:
+            self.permission_service.handle_user_response(self.permission_id, granted)

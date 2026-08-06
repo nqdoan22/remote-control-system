@@ -103,6 +103,14 @@ class GatewayService(QThread):
                 async with websockets.connect(
                     settings.GATEWAY_WS_URL,
                     max_size=settings.WS_MAX_SIZE,
+                    # Ping/Pong Keepalive: máy idle lâu (không gõ phím/chuột) có thể
+                    # khiến mạng/adapter vào trạng thái ngủ, tạo kết nối "half-open"
+                    # (tưởng còn sống nhưng thực tế đã chết). Ping định kỳ + timeout
+                    # sẽ phát hiện kết nối chết → đóng để auto-reconnect ngay thay vì
+                    # kẹt mãi dẫn tới Gateway đánh dấu máy offline vĩnh viễn.
+                    ping_interval=settings.WS_PING_INTERVAL_SECONDS,
+                    ping_timeout=settings.WS_PING_TIMEOUT_SECONDS,
+                    close_timeout=settings.WS_CLOSE_TIMEOUT_SECONDS,
                 ) as ws:
                     self.websocket = ws
                     logger.info(">>> ĐÃ KẾT NỐI THÀNH CÔNG TỚI GATEWAY! <<<")
@@ -196,13 +204,25 @@ class GatewayService(QThread):
                     self.frame_queue.task_done()
 
     async def _send_one(self, msg_dict: Dict[str, Any]):
-        """Serialize và gửi một tin nhắn lên Gateway (bọc lỗi để không chết vòng lặp)."""
+        """
+        Serialize và gửi một tin nhắn lên Gateway.
+
+        QUAN TRỌNG: nếu gửi thất bại (kết nối chết/half-open do máy idle lâu),
+        phải chủ động ĐÓNG socket để kích hoạt vòng lặp _receive_loop báo lỗi
+        → auto-reconnect. Trước đây lỗi gửi bị nuốt lặng im, khiến Client tưởng
+        kết nối còn sống và không bao giờ reconnect → Gateway vĩnh viễn đánh dấu
+        máy offline dù Python vẫn đang chạy.
+        """
         try:
             raw_json = json.dumps(msg_dict)
             await self.websocket.send(raw_json)
             logger.debug(f"[SEND] Đã gửi envelope: type={msg_dict.get('type')}")
         except Exception as e:
             logger.error(f"Lỗi khi gửi gói tin lên Gateway: {e}")
+            try:
+                await self.websocket.close()
+            except Exception:
+                pass
 
     async def _heartbeat_loop(self):
         """
@@ -211,13 +231,22 @@ class GatewayService(QThread):
         """
         while self.running and self.websocket:
             await asyncio.sleep(settings.HEARTBEAT_INTERVAL_SECONDS)
-            
-            # Đọc tài nguyên phần cứng thời gian thực via psutil
-            cpu = psutil.cpu_percent(interval=None)
-            ram = psutil.virtual_memory().percent
+
+            # Đọc tài nguyên phần cứng thời gian thực via psutil.
+            # Bọc try/except để nếu psutil gặp lỗi (hoặc cpu_percent trả None ở
+            # lần gọi đầu) thì vẫn GỬI heartbeat — heartbeat quyết định máy online,
+            # tuyệt đối không được để lỗi đọc CPU/RAM làm máy bị đánh dấu offline.
+            try:
+                cpu = psutil.cpu_percent(interval=None) or 0.0
+            except Exception:
+                cpu = 0.0
+            try:
+                ram = psutil.virtual_memory().percent or 0.0
+            except Exception:
+                ram = 0.0
 
             # Cập nhật chỉ số CPU/RAM lên giao diện chính
-            self.metrics_signal.emit(cpu, ram)
+            self.metrics_signal.emit(float(cpu), float(ram))
 
             # Đóng gói theo chuẩn WSMessage Envelope. LƯU Ý: type PHẢI là "heartbeat"
             # (không phải "system.heartbeat") — đây là literal duy nhất mà

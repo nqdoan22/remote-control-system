@@ -10,15 +10,15 @@ ARCHITECTURE ROLE:
 """
 
 import logging
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 # Import công cụ CSDL và Security
 from db.database import get_db
 from db.models import Machine, User
-from schemas.machine import MachineResponse, MachineUpdateStatus, MachineListResponse
+from schemas.machine import MachineResponse, MachineUpdateStatus, MachineListResponse, MachineStatus
 from core.security import get_current_user
 
 # Khởi tạo Logger và Router
@@ -32,15 +32,23 @@ router = APIRouter(prefix="/machines", tags=["Machine Management"])
 @router.get("/", response_model=MachineListResponse, summary="Lấy danh sách tất cả các máy Agent")
 def get_all_machines(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user) # Bắt buộc phải có Token Admin mới xem được
+    current_user: User = Depends(get_current_user),
+    skip: int = Query(0, ge=0, description="Số bản ghi bỏ qua (phân trang)"),
+    limit: int = Query(50, ge=1, le=200, description="Số bản ghi tối đa trả về"),
+    status: Optional[MachineStatus] = Query(None, description="Lọc trạng thái: online / offline / busy"),
 ):
     """
     API phục vụ màn hình Dashboard trên Frontend:
-    Mở bảng 'machines' trong CSDL và trả về danh sách toàn bộ các máy Agent đã từng kết nối.
+    Mở bảng 'machines' trong CSDL và trả về danh sách các máy Agent đã từng kết nối.
+    Hỗ trợ phân trang (skip/limit) và lọc theo trạng thái (status).
     Trả về theo đúng MachineListResponse Schema ({ total, machines }) mà Frontend mong đợi.
     """
-    machines = db.query(Machine).order_by(Machine.last_seen.desc()).all()
-    return MachineListResponse(total=len(machines), machines=machines)
+    query = db.query(Machine)
+    if status is not None:
+        query = query.filter(Machine.status == status.value)
+    total = query.count()
+    machines = query.order_by(Machine.last_seen.desc()).offset(skip).limit(limit).all()
+    return MachineListResponse(total=total, machines=machines)
 
 
 # =========================================================================

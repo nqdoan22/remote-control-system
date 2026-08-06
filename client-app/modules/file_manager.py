@@ -10,11 +10,13 @@ ARCHITECTURE ROLE:
 """
 
 import base64
+import io
 import logging
 import os
 from pathlib import Path
 import shutil
 from typing import List, Dict, Any, Optional
+import zipfile
 
 # Import cấu hình lấy SANDBOX_DIR
 from config import settings
@@ -122,8 +124,14 @@ def download_file(subpath: str) -> Dict[str, Any]:
     try:
         target_file = _sanitize_path(subpath)
 
-        if not target_file.exists() or not target_file.is_file():
-            return {"success": False, "code": "FILE_NOT_FOUND", "message": "File không tồn tại hoặc là thư mục.", "file_data_base64": ""}
+        if not target_file.exists():
+            return {"success": False, "code": "FILE_NOT_FOUND", "message": "File không tồn tại.", "file_data_base64": ""}
+
+        if not target_file.is_file():
+            # Trường hợp này xảy ra khi nhận đúng path THƯ MỤC nhưng Client còn
+            # chạy PHIÊN BẢN CŨ (dispatcher cũ gọi thẳng download_file thay vì
+            # download_path). Nói rõ để Admin không nhầm với lỗi "không tồn tại".
+            return {"success": False, "code": "FILE_NOT_FOUND", "message": "Đường dẫn là thư mục, không phải file đơn. Hãy cập nhật Client lên phiên bản mới nhất để tải thư mục (nén thành .zip).", "file_data_base64": ""}
 
         if target_file.stat().st_size > MAX_FILE_SIZE:
             return {"success": False, "code": "FILE_TOO_LARGE", "message": "File vượt quá dung lượng cho phép (Max 50MB).", "file_data_base64": ""}
@@ -146,6 +154,64 @@ def download_file(subpath: str) -> Dict[str, Any]:
         return {"success": False, "code": "INVALID_PATH", "message": str(pe), "file_data_base64": ""}
     except Exception as e:
         return {"success": False, "code": "INTERNAL_ERROR", "message": f"Lỗi đọc file: {str(e)}", "file_data_base64": ""}
+
+
+def download_folder(subpath: str) -> Dict[str, Any]:
+    """
+    Nén toàn bộ thư mục (kèm cây thư mục con) thành 1 file ZIP trong bộ nhớ
+    rồi trả về Base64 cho Admin tải về. Giới hạn 50MB áp dụng cho file ZIP.
+    """
+    try:
+        target_dir = _sanitize_path(subpath)
+
+        if not target_dir.exists() or not target_dir.is_dir():
+            return {"success": False, "code": "FILE_NOT_FOUND", "message": "Thư mục không tồn tại hoặc không phải thư mục.", "file_data_base64": ""}
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, _dirs, files in os.walk(target_dir):
+                for fname in files:
+                    full_path = os.path.join(root, fname)
+                    # Tên bên trong zip tương đối so với thư mục được chọn
+                    # (VD: chọn "Report" -> "Report\\2024\\jan.xlsx").
+                    arcname = os.path.relpath(full_path, target_dir.parent)
+                    zf.write(full_path, arcname)
+
+        zip_bytes = buffer.getvalue()
+        if len(zip_bytes) > MAX_FILE_SIZE:
+            return {"success": False, "code": "FILE_TOO_LARGE", "message": "Thư mục sau khi nén vượt quá 50MB (Max 50MB).", "file_data_base64": ""}
+
+        zip_name = f"{target_dir.name}.zip"
+        encoded = base64.b64encode(zip_bytes).decode("utf-8")
+        logger.info(f"📦 Đã nén thư mục '{subpath}' -> '{zip_name}' ({len(zip_bytes)} bytes)")
+        return {
+            "success": True,
+            "message": f"Đã nén thư mục '{target_dir.name}' thành '{zip_name}'.",
+            "file_name": zip_name,
+            "file_data_base64": encoded,
+            "size_bytes": len(zip_bytes),
+        }
+
+    except PermissionError as pe:
+        return {"success": False, "code": "INVALID_PATH", "message": str(pe), "file_data_base64": ""}
+    except Exception as e:
+        return {"success": False, "code": "INTERNAL_ERROR", "message": f"Lỗi nén thư mục: {str(e)}", "file_data_base64": ""}
+
+
+def download_path(subpath: str) -> Dict[str, Any]:
+    """
+    Điểm vào chung cho file.download: tự nhận diện path là FILE hay THƯ MỤC.
+      - File → tải file đơn.
+      - Thư mục → nén thành .zip rồi tải về.
+    """
+    try:
+        target = _sanitize_path(subpath)
+    except PermissionError as pe:
+        return {"success": False, "code": "INVALID_PATH", "message": str(pe), "file_data_base64": ""}
+
+    if target.is_dir():
+        return download_folder(subpath)
+    return download_file(subpath)
 
 
 def upload_file(subpath: str, file_data_base64: str) -> Dict[str, Any]:

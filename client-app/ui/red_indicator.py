@@ -108,6 +108,21 @@ class RedIndicatorWidget(QWidget):
             y = 20
             self.move(x, y)
 
+    def showEvent(self, event):
+        """
+        Ngay khi đèn báo được hiển thị, đánh dấu cửa sổ ở CẤP ĐỘ HỆ ĐIỀU HÀNH là
+        "không bao giờ bị chụp màn hình" (SetWindowDisplayAffinity /
+        WDA_EXCLUDEFROMCAPTURE). Đèn đỏ sẽ không bao giờ lọt vào ảnh chụp của
+        Admin dù có race timing nào — Windows tự thay nó bằng vùng đen trong
+        mọi capture.
+        """
+        super().showEvent(event)
+        try:
+            from modules.screenshot import exclude_window_from_capture
+            exclude_window_from_capture(int(self.winId()))
+        except Exception:
+            pass
+
     def _toggle_blink(self):
         """Đổi trạng thái hiển thị của chấm đỏ để tạo hiệu ứng nhấp nháy cảnh báo."""
         self.dot_visible = not self.dot_visible

@@ -51,6 +51,16 @@ async def heartbeat_loop(manager: ConnectionManager) -> None:
             )
 
             for machine_id in stale_ids:
+                # Trong lúc quét, có thể heartbeat đã đến kịp và client_handler
+                # đã tự phục hồi máy về online (xem restore_if_offline) — nếu vậy
+                # thì không được đóng socket của kết nối đang sống.
+                info = manager.registry.get(machine_id)
+                if info is None or info.status == "online":
+                    logger.debug(
+                        "Machine '%s' đã được phục hồi online, bỏ qua timeout", machine_id
+                    )
+                    continue
+
                 logger.warning(
                     "Machine '%s' timed out — marking offline", machine_id
                 )

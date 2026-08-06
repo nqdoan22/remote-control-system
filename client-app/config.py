@@ -57,6 +57,23 @@ class ClientSettings(BaseSettings):
         default=5,
         description="Chu kỳ (giây) gửi tín hiệu Heartbeat điểm danh tới Gateway."
     )
+    # Ping/Pong Keepalive cho WebSocket. Các giá trị này PHẢI nhỏ hơn
+    # HEARTBEAT_TIMEOUT của Gateway (45s) để khi máy idle lâu (mạng ngủ đông,
+    # half-open connection) Client phát hiện kết nối chết và reconnect TRƯỚC khi
+    # Gateway kịp đánh dấu máy offline. Nếu không, máy bị "kẹt offline" dù Python
+    # vẫn đang chạy và chỉ hết khi reconnect (khi bấm phím/chuột) — đúng bug đã báo.
+    WS_PING_INTERVAL_SECONDS: int = Field(
+        default=10,
+        description="Chu kỳ (giây) Client gửi Ping duy trì kết nối tới Gateway."
+    )
+    WS_PING_TIMEOUT_SECONDS: int = Field(
+        default=15,
+        description="Thời gian (giây) chờ Pong từ Gateway trước khi coi kết nối đã chết."
+    )
+    WS_CLOSE_TIMEOUT_SECONDS: float = Field(
+        default=5.0,
+        description="Thời gian (giây) tối đa chờ hoàn tất bắt tay đóng WebSocket (close handshake)."
+    )
     # Dung lượng tối đa (bytes) của 1 gói tin WebSocket có thể nhận.
     # Mặc định thư viện websockets là 1MB — quá nhỏ cho File Transfer:
     # file 50MB (theo api_contract.md) sau base64 ~67MB. Nới lên 100MB để không
@@ -120,6 +137,14 @@ class ClientSettings(BaseSettings):
     JPEG_QUALITY: int = Field(
         default=60,
         description="Mức chất lượng nén ảnh JPEG (1-100) để tối ưu băng thông mạng LAN."
+    )
+    SCREENSHOT_OVERLAY_SETTLE_MS: int = Field(
+        default=500,
+        description="Độ trễ (ms) chờ DWM (Windows compositor) cập nhật màn hình SAU khi đã ẩn "
+                    "các cửa sổ UI overlay (Popup xin quyền, đèn báo đỏ) và TRƯỚC khi grab. "
+                    "Chỉ áp dụng khi có overlay đang hiển thị (chụp bình thường không bị chậm). "
+                    "Trên Windows 10 DWM xóa frame cũ (ghost) CHẬM HƠN Windows 11 nên cần "
+                    "thời gian đợi dài hơn, nếu không ảnh chụp còn lẫn 'bóng mờ' của popup."
     )
     LIVE_SCREEN_EXCLUDE_OWN_UI: bool = Field(
         default=True,

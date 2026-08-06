@@ -171,6 +171,11 @@ async def handle_client(websocket: WebSocketServerProtocol, manager: ConnectionM
             msg_type = get_type(message)
             logger.debug("Received '%s' from machine '%s'", msg_type, machine_id)
 
+            # Tự phục hồi online nếu machine đang bị đánh dấu offline nhưng socket
+            # vẫn còn sống (VD: máy idle/ngủ đông rồi quay lại, heartbeat tiếp tục
+            # chảy trên socket cũ). Nếu không, machine sẽ kẹt offline vĩnh viễn.
+            await manager.restore_if_offline(machine_id, websocket)
+
             await route_from_client(
                 message, machine_id, manager, manager.permission_manager, manager.command_tracker
             )

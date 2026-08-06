@@ -386,7 +386,9 @@ class CommandDispatcher(QObject):
 
     def _handle_file_download(self, payload: Dict[str, Any], original: Dict[str, Any]) -> None:
         path = str(payload.get("path", ""))
-        result = file_manager.download_file(path)
+        # Tự nhận diện File/Thư mục: thư mục được nén thành <tên>.zip rồi trả về
+        # (xem file_manager.download_path) — Admin chỉ cần gửi path, không cần biết loại.
+        result = file_manager.download_path(path)
         if not result.get("success"):
             self._send_error(original, result.get("code", "INTERNAL_ERROR"), result.get("message", ""))
             return

@@ -106,6 +106,32 @@ class ConnectionManager:
         """Cập nhật lastSeen — gọi mỗi khi nhận message từ machine."""
         self.registry.touch(machine_id)
 
+    async def restore_if_offline(self, machine_id: str, websocket) -> None:
+        """
+        Tự phục hồi trạng thái Online cho machine đang bị đánh dấu offline.
+
+        Vấn đề: nếu Client App mất mạng/ngủ đông một lúc (để máy idle lâu),
+        Gateway đánh dấu machine offline và đóng socket. Khi máy quay lại hoạt
+        động, Client App có thể tiếp tục gửi heartbeat trên CHÍNH socket cũ
+        (half-open connection) mà không cần reconnect. Nếu không xử lý, machine
+        sẽ bị kẹt "offline" vĩnh viễn dù heartbeat vẫn đang chảy — chính là bug
+        "máy offline mãi không trở lại online".
+
+        Hàm này kiểm tra: machine đang offline nhưng vẫn nhận được message trên
+        socket còn sống → đăng ký lại socket, đưa về online và notify Web App.
+        """
+        info = self.registry.get(machine_id)
+        if info is None or info.status == "online":
+            return
+
+        # Socket vẫn hoạt động (heartbeat/message tiếp tục đến) → máy thực sự online
+        self._client_sockets[machine_id] = websocket
+        info.set_online()
+        logger.info(
+            "Machine '%s' tự phục hồi trạng thái online (socket còn sống)", machine_id
+        )
+        await self._notify_machine_status(machine_id, "online")
+
     def remove_client_socket(self, machine_id: str) -> object | None:
         """
         Xóa và trả về socket của machine khỏi _client_sockets.
@@ -135,6 +161,23 @@ class ConnectionManager:
 
         self._webapp_socket = websocket
         logger.info("Web App registered")
+
+        # Đồng bộ trạng thái HIỆN TẠI của tất cả machines về Web App ngay khi nó
+        # (kết nối lại). Nếu không, khi Backend/Web App bị rớt kết nối trong lúc
+        # một máy online/offline, nó sẽ mất sự kiện machine.status tương ứng và
+        # Dashboard giữ trạng thái CŨ (VD: máy vẫn "offline" dù đã online lại).
+        await self.sync_machines_to_webapp()
+
+    async def sync_machines_to_webapp(self) -> None:
+        """
+        Gửi sự kiện machine.status cho TẤT CẢ machines đã biết về Web App.
+        Dùng khi Web App vừa kết nối / kết nối lại để Backend luôn có trạng thái
+        mới nhất trong CSDL (Dashboard không bị lệch online/offline).
+        """
+        if self._webapp_socket is None:
+            return
+        for machine_id in self.registry.get_all_ids():
+            await self._notify_machine_status(machine_id, self.registry.get(machine_id).status)
 
     async def unregister_webapp(self):
         """Hủy đăng ký Web App khi mất kết nối."""
