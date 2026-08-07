@@ -13,6 +13,7 @@ import ctypes
 from ctypes import wintypes
 import logging
 import subprocess
+import time
 from typing import List, Dict, Any, Optional
 import psutil
 
@@ -42,17 +43,58 @@ def _get_window_pid(hwnd: int) -> int:
     return pid.value
 
 
+def _attach_cpu_usage(app_items: List[Dict[str, Any]], interval: float = 0.3) -> None:
+    """
+    Tính %CPU thực tế cho từng ứng dụng (theo PID) và gắn vào khóa 'cpu_percent'.
+
+    Lần đọc cpu_percent() đầu tiên của một tiến trình luôn trả 0 (psutil cần một
+    mốc so sánh), nên phải "mồi" baseline rồi đo lại sau một khoảng ngắn. Giá trị
+    được chia cho số CPU logic để quy về thang 0–100% (giống Task Manager),
+    thay vì tổng theo lõi (có thể vượt 100%).
+
+    Lưu ý: hàm có ngủ `interval` giây (mặc định 0.3s) nên sẽ chặn luồng gọi trong
+    khoảng đó. Ứng dụng GUI đang rảnh vẫn cho ~0% là bình thường.
+    """
+    pids = {a["pid"] for a in app_items if a.get("pid")}
+    procs: Dict[int, psutil.Process] = {}
+    for pid in pids:
+        try:
+            proc = psutil.Process(pid)
+            proc.cpu_percent(None)  # mồi baseline (luôn trả 0 ở lần đầu)
+            procs[pid] = proc
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    if not procs:
+        for a in app_items:
+            a["cpu_percent"] = 0.0
+        return
+
+    time.sleep(interval)
+    ncpu = psutil.cpu_count() or 1
+    cpu_map: Dict[int, float] = {}
+    for pid, proc in procs.items():
+        try:
+            cpu_map[pid] = round(proc.cpu_percent(None) / ncpu, 1)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            cpu_map[pid] = 0.0
+
+    for a in app_items:
+        a["cpu_percent"] = cpu_map.get(a.get("pid"), 0.0)
+
+
 def list_applications() -> List[Dict[str, Any]]:
     """
     Quét và trả về danh sách các Ứng dụng đang hiển thị cửa sổ giao diện trên màn hình.
-    
+
     Returns:
         List[Dict[str, Any]]: Danh sách ứng dụng GUI. Cấu trúc mỗi item:
         {
             "pid": int,
             "app_name": str,
             "window_title": str,
-            "hwnd": int
+            "hwnd": int,
+            "cpu_percent": float
         }
     """
     applications: List[Dict[str, Any]] = []
@@ -99,6 +141,14 @@ def list_applications() -> List[Dict[str, Any]]:
         logger.info(f"💻 Đã tìm thấy {len(applications)} ứng dụng GUI đang hoạt động.")
     except Exception as e:
         logger.error(f"❌ Lỗi khi duyệt danh sách ứng dụng GUI: {str(e)}")
+
+    # Gắn %CPU thực tế theo từng PID (thay cho giá trị 0.0 cứng trước đây)
+    try:
+        _attach_cpu_usage(applications)
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi tính %CPU ứng dụng: {str(e)}")
+        for a in applications:
+            a.setdefault("cpu_percent", 0.0)
 
     return applications
 

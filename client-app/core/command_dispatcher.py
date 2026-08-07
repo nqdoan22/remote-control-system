@@ -134,7 +134,7 @@ class CommandDispatcher(QObject):
             {
                 "name": app.get("app_name", "Unknown"),
                 "pid": app.get("pid"),
-                "cpuUsage": 0.0,
+                "cpuUsage": app.get("cpu_percent", 0.0),
                 "mainWindowTitle": app.get("window_title", ""),
             }
             for app in raw_apps
