@@ -283,6 +283,7 @@ async def _handle_machine_list(manager: ConnectionManager, original_msg_id: str)
             success=True,
             data={"machines": machines},
             destination="webapp",
+            original_message_id=original_msg_id,
         )
     )
     logger.debug("machine.list → returned %d machines", len(machines))

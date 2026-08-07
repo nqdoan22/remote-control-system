@@ -37,14 +37,21 @@ def make_response(
     success: bool,
     data: dict | None = None,
     destination: str = "",
+    original_message_id: str | None = None,
 ) -> dict:
     """Tạo response thành công."""
+    payload: dict[str, Any] = {
+        "success": success,
+        "data": data or {},
+    }
+    # Cho phép response mang originalMessageId để bên gửi (Backend Web App) có
+    # thể khớp đúng request đang chờ — cần cho lệnh machine.list (reconcile).
+    if original_message_id:
+        payload["originalMessageId"] = original_message_id
+
     return make_message(
         msg_type="response",
-        payload={
-            "success": success,
-            "data": data or {},
-        },
+        payload=payload,
         destination=destination,
     )
 

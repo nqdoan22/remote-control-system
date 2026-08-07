@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     # Thời gian chờ (Timeout) phản hồi lệnh từ Gateway/Client Agent (giây)
     COMMAND_TIMEOUT_SECONDS: int = 15
 
+    # Chu kỳ (giây) Backend tự đồng bộ trạng thái machines trong CSDL với danh
+    # sách ONLINE thực tế của Gateway (machine.list). Tránh hiển thị "online" giả
+    # cho máy không còn kết nối khi Gateway/Backend restart làm thất lạc sự kiện.
+    MACHINE_RECONCILE_INTERVAL_SECONDS: int = 20
+
     # Dung lượng tối đa (bytes) của 1 gói tin WebSocket Backend chấp nhận khi nhận.
     # Mặc định thư viện websockets là 1MB — quá nhỏ cho File Transfer: file 50MB
     # (theo api_contract.md) sau base64 ~67MB. Nới lên 100MB để không bị đóng kết

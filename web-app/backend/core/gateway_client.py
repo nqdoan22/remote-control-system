@@ -52,6 +52,9 @@ class GatewayClient:
         
         # Task chạy ngầm duy trì lắng nghe và kết nối lại
         self._connection_task: Optional[asyncio.Task] = None
+
+        # Task chạy ngầm đồng bộ định kỳ trạng thái machines với Gateway
+        self._reconcile_task: Optional[asyncio.Task] = None
         
         # BẢNG TRA CỨU PHẢN HỒI (Pending Requests):
         # Lưu trữ các asyncio.Future đang chờ phản hồi từ Gateway.
@@ -92,8 +95,14 @@ class GatewayClient:
             return
 
         self._running = True
+        # Đặt toàn bộ machines về offline ngay khi Backend khởi động (nguyên tắc
+        # "presumed dead until proven alive"): trạng thái online chỉ được khôi phục
+        # khi Gateway xác nhận máy đó đang kết nối qua sự kiện / reconcile.
+        self.mark_all_machines_offline()
         # Tạo một Task chạy ngầm không chặn (Non-blocking) toàn bộ ứng dụng FastAPI
         self._connection_task = asyncio.create_task(self._connection_loop())
+        # Vòng lặp định kỳ đối chiếu trạng thái machines giữa CSDL và Gateway
+        self._reconcile_task = asyncio.create_task(self._reconcile_loop())
         logger.info("Khởi tạo dịch vụ Gateway Client ngầm thành công.")
 
     async def _connection_loop(self):
@@ -120,8 +129,19 @@ class GatewayClient:
                     # Gửi gói tin xác thực WebApp để nhận được các sự kiện Broadcast từ Gateway
                     await self._send_auth_message()
 
-                    # Bắt đầu vòng lặp lắng nghe tin nhắn từ Gateway
-                    await self._listen_loop()
+                    # Bắt đầu vòng lặp lắng nghe tin nhắn từ Gateway (chạy nền)
+                    listen_task = asyncio.create_task(self._listen_loop())
+
+                    # Đồng bộ trạng thái machines NGAY khi vừa kết nối: đối chiếu CSDL
+                    # với danh sách ONLINE thật sự trên Gateway để "gỡ kẹt" các máy đang
+                    # hiển thị online giả (Gateway/Backend restart làm mất sự kiện offline).
+                    try:
+                        await self.reconcile_machine_statuses()
+                    except Exception as exc:
+                        logger.warning(f"Không thể đồng bộ trạng thái machines sau khi kết nối: {exc}")
+
+                    # Chờ vòng lặp lắng nghe kết thúc (kết nối đóng -> tự reconnect)
+                    await listen_task
 
             except (ConnectionClosedError, ConnectionClosedOK) as e:
                 logger.warning(f"⚠️ Ngắt kết nối khỏi Gateway Server: {e}")
@@ -331,6 +351,111 @@ class GatewayClient:
             db.close()
 
     # =========================================================================
+    # 🌟 HÀM HIGHLIGHT 3.5: ĐỒNG BỘ TRẠNG THÁI MACHINES VỚI GATEWAY (RECONCILE)
+    # =========================================================================
+
+    async def reconcile_machine_statuses(self) -> None:
+        """
+        Đồng bộ trạng thái machines trong CSDL với danh sách ONLINE thực tế của
+        Gateway (nguồn chân lý: in-memory MachineRegistry). Máy nào Gateway KHÔNG
+        báo online -> đặt offline trong CSDL.
+
+        Sửa lỗi "máy hiển thị online nhưng thật ra không chạy Client App": trước
+        đây CSDL chỉ được cập nhật theo sự kiện machine.status mà Gateway gửi chủ
+        động; nếu Gateway/Backend restart đúng lúc máy đang online thì sự kiện
+        offline không bao giờ được phát -> máy kẹt online mãi. Reconcile sẽ quét
+        định kỳ và ngay sau mỗi lần kết nối để tự sửa sai lệch.
+        """
+        if not self.is_connected or not self.ws:
+            logger.debug("Bỏ qua reconcile machines: chưa kết nối Gateway.")
+            return
+
+        try:
+            request = WSMessage(
+                type="machine.list",
+                source=settings.BACKEND_SOURCE_ID,
+                destination="gateway",
+                payload={},
+            )
+            response = await self.send_command_and_wait_response(
+                request, timeout=settings.COMMAND_TIMEOUT_SECONDS
+            )
+        except Exception as e:
+            logger.warning(f"Không thể lấy danh sách machines từ Gateway để đồng bộ: {e}")
+            return
+
+        payload = response.payload
+        if not isinstance(payload, dict):
+            return
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            return
+        machines = data.get("machines")
+        if not isinstance(machines, list):
+            return
+
+        online_ids = {
+            m.get("machineId")
+            for m in machines
+            if isinstance(m, dict) and m.get("status") == "online" and m.get("machineId")
+        }
+        self._apply_reconciled_statuses(online_ids)
+
+    def _apply_reconciled_statuses(self, online_ids: set) -> None:
+        """Cập nhật lại status toàn bộ machines trong CSDL theo danh sách online_ids."""
+        db = SessionLocal()
+        try:
+            machines = db.query(Machine).all()
+            if not machines:
+                return
+            now = datetime.now(timezone.utc)
+            for machine in machines:
+                target = "online" if machine.machine_id in online_ids else "offline"
+                if machine.status != target:
+                    machine.status = target
+                    logger.info(f"🔄 Đồng bộ trạng thái máy '{machine.machine_id}' -> {target}.")
+                if target == "online":
+                    machine.last_seen = now
+            db.commit()
+        except Exception as e:
+            logger.error(f"Không thể đồng bộ trạng thái machines trong CSDL: {e}")
+            db.rollback()
+        finally:
+            db.close()
+
+    def mark_all_machines_offline(self) -> None:
+        """
+        Đặt toàn bộ machines trong CSDL về offline khi Backend khởi động.
+        Nguyên tắc "presumed dead until proven alive": trạng thái online chỉ được
+        khôi phục khi Gateway xác nhận máy đó đang kết nối (qua sự kiện / reconcile).
+        """
+        db = SessionLocal()
+        try:
+            machines = db.query(Machine).filter(Machine.status != "offline").all()
+            for machine in machines:
+                machine.status = "offline"
+                logger.info(f"🔌 Khởi động Backend: đặt máy '{machine.machine_id}' về offline.")
+            db.commit()
+        except Exception as e:
+            logger.error(f"Không thể đặt machines về offline khi khởi động: {e}")
+            db.rollback()
+        finally:
+            db.close()
+
+    async def _reconcile_loop(self):
+        """
+        Vòng lặp định kỳ đồng bộ trạng thái machines với Gateway. Là lớp an toàn
+        (safety net) cho trường hợp Gateway restart mà Backend không mất kết nối,
+        hoặc có sự kiện machine.status bị thất lạc trong lúc xử lý.
+        """
+        while self._running:
+            await asyncio.sleep(settings.MACHINE_RECONCILE_INTERVAL_SECONDS)
+            try:
+                await self.reconcile_machine_statuses()
+            except Exception as e:
+                logger.error(f"Lỗi trong vòng lặp đồng bộ machines: {e}")
+
+    # =========================================================================
     # 🌟 HÀM HIGHLIGHT 4: GỬI LỆNH VÀ CHỜ PHẢN HỒI (HÀM CỐT LÕI CHO API ROUTERS)
     # =========================================================================
 
@@ -509,7 +634,12 @@ class GatewayClient:
         """
         logger.info("Đang dừng dịch vụ Gateway Client...")
         self._running = False
-        
+
+        # Hủy vòng lặp đồng bộ trạng thái định kỳ
+        if self._reconcile_task:
+            self._reconcile_task.cancel()
+            self._reconcile_task = None
+
         # Hủy các Future đang chờ phản hồi
         for msg_id, future in self.pending_requests.items():
             if not future.done():
