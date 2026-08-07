@@ -7,7 +7,9 @@ import { fileActionApi, uploadFileApi, isWsError, getWsErrorMessage, getWsData }
  * chunk theo giao thức: mỗi file tối đa 50MB, truyền base64 trong 1 request/response.
  */
 const FileTransfer = ({ selectedMachine }) => {
-  const [currentPath, setCurrentPath] = useState('C:\\RemoteControl\\'); // Sandbox mặc định
+  // Đường dẫn TƯƠNG ĐỐI bên trong Sandbox ('' = thư mục gốc C:\AgentSandbox).
+  // Client (_sanitize_path) tự ghép vào SANDBOX_DIR, nên KHÔNG gửi đường dẫn tuyệt đối.
+  const [currentPath, setCurrentPath] = useState('');
   const [fileList, setFileList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [transferStatus, setTransferStatus] = useState('');
@@ -16,7 +18,7 @@ const FileTransfer = ({ selectedMachine }) => {
   // khi selectedMachine bị tạo lại do isConnected (WS) thay đổi.
   const machineId = selectedMachine?.machineId;
   useEffect(() => {
-    setCurrentPath('C:\\RemoteControl\\');
+    setCurrentPath('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [machineId]);
 
@@ -46,25 +48,23 @@ const FileTransfer = ({ selectedMachine }) => {
 
   const handleItemClick = (item) => {
     if (item.type === 'directory') {
-      const newPath = currentPath.endsWith('\\')
-        ? `${currentPath}${item.name}`
-        : `${currentPath}\\${item.name}`;
+      // Ghép subpath tương đối; '' (gốc) thì subpath mới chính là tên thư mục
+      const newPath = currentPath ? `${currentPath}\\${item.name}` : item.name;
       setCurrentPath(newPath);
     }
   };
 
   const handleNavigateUp = () => {
     const parts = currentPath.split('\\').filter(Boolean);
-    if (parts.length > 1) {
-      parts.pop();
-      setCurrentPath(parts.join('\\') + '\\');
-    }
+    if (parts.length === 0) return; // đã ở gốc Sandbox
+    parts.pop();
+    setCurrentPath(parts.join('\\'));
   };
 
   // 📥 TẢI FILE TỪ CLIENT VỀ ADMIN (file.download - single shot, tối đa 50MB)
   const handleDownloadFile = async (fileName) => {
     if (!selectedMachine) return;
-    const fullFilePath = currentPath.endsWith('\\') ? `${currentPath}${fileName}` : `${currentPath}\\${fileName}`;
+    const fullFilePath = currentPath ? `${currentPath}\\${fileName}` : fileName;
     setTransferStatus(`Đang tải file "${fileName}" từ Client...`);
 
     try {
@@ -101,7 +101,7 @@ const FileTransfer = ({ selectedMachine }) => {
       return;
     }
 
-    const destinationPath = currentPath.endsWith('\\') ? `${currentPath}${file.name}` : `${currentPath}\\${file.name}`;
+    const destinationPath = currentPath ? `${currentPath}\\${file.name}` : file.name;
     setTransferStatus(`Đang tải file lên Client: ${file.name}...`);
 
     try {
@@ -129,11 +129,13 @@ const FileTransfer = ({ selectedMachine }) => {
           ⬆️ Thư Mục Cha
         </button>
 
+        <span style={styles.pathPrefix}>C:\AgentSandbox\</span>
         <input
           type="text"
           value={currentPath}
           onChange={(e) => setCurrentPath(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && fetchDirectoryContent(currentPath)}
+          placeholder="(thư mục con — để trống là thư mục gốc)"
           style={styles.pathInput}
         />
 
@@ -144,7 +146,7 @@ const FileTransfer = ({ selectedMachine }) => {
       </div>
 
       <div style={styles.sandboxNotice}>
-        🔒 Chỉ được thao tác trong thư mục Sandbox đã cấu hình trên Client (mặc định <code>C:\RemoteControl\</code>). Kích thước file tối đa: 50MB.
+        🔒 Mọi thao tác bị giới hạn trong thư mục Sandbox trên Client: <code>C:\AgentSandbox\</code>. Ô đường dẫn phía trên là vị trí <b>tương đối</b> bên trong Sandbox (để trống = thư mục gốc). Kích thước file tối đa: 50MB.
       </div>
 
       {transferStatus && (
@@ -200,6 +202,7 @@ const styles = {
   container: { display: 'flex', flexDirection: 'column', height: '100%', gap: '12px' },
   topBar: { display: 'flex', gap: '8px', alignItems: 'center' },
   btnSecondary: { padding: '8px 12px', backgroundColor: '#334155', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' },
+  pathPrefix: { color: '#94a3b8', fontFamily: 'monospace', fontSize: '0.85rem', whiteSpace: 'nowrap' },
   pathInput: { flex: 1, padding: '8px 12px', backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '6px', color: '#fff', fontFamily: 'monospace' },
   btnUpload: { padding: '8px 16px', backgroundColor: '#0284c7', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem' },
   sandboxNotice: { fontSize: '0.8rem', color: '#94a3b8' },
