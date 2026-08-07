@@ -136,6 +136,9 @@ class CommandDispatcher(QObject):
                 "pid": app.get("pid"),
                 "cpuUsage": app.get("cpu_percent", 0.0),
                 "mainWindowTitle": app.get("window_title", ""),
+                # hwnd = handle cửa sổ, DUY NHẤT cho từng cửa sổ. Một tiến trình có
+                # thể có nhiều cửa sổ (cùng PID) -> cần hwnd làm khóa unique ở UI.
+                "hwnd": app.get("hwnd"),
             }
             for app in raw_apps
         ]
