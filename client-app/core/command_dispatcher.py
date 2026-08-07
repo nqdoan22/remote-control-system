@@ -21,10 +21,14 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 
 # Import cấu hình định danh Agent
 from config import settings
+
+# Độ trễ (ms) trước khi chụp màn hình, để popup xin quyền (và hiệu ứng đóng cửa
+# sổ) kịp biến mất khỏi màn hình — tránh ảnh chụp còn dính popup.
+SCREENSHOT_CAPTURE_DELAY_MS = 350
 
 # Import các Module thực thi lệnh (Direct Execution - tương tác cấp OS)
 from modules import applications, processes, screenshot, file_manager, power_control
@@ -204,7 +208,22 @@ class CommandDispatcher(QObject):
     #            & LIVE SCREEN (nhạy cảm)
     # =========================================================================
     def _handle_screen_screenshot(self, payload: Dict[str, Any], original: Dict[str, Any]) -> None:
-        result = screenshot.take_screenshot()
+        # Hoãn chụp một chút bằng QTimer (KHÔNG dùng time.sleep vì sẽ block event
+        # loop khiến popup không kịp đóng). Trong lúc chờ, Qt tiếp tục xử lý sự
+        # kiện đóng popup -> khi chụp thì màn hình đã sạch popup.
+        QTimer.singleShot(
+            SCREENSHOT_CAPTURE_DELAY_MS,
+            lambda: self._capture_and_send_screenshot(original),
+        )
+
+    def _capture_and_send_screenshot(self, original: Dict[str, Any]) -> None:
+        """Chụp màn hình và gửi kết quả — chạy sau khi popup đã đóng hẳn."""
+        try:
+            result = screenshot.take_screenshot()
+        except Exception as e:
+            self._send_error(original, "INTERNAL_ERROR", f"Lỗi chụp màn hình: {e}")
+            return
+
         if result.get("success"):
             self._send_response(original, {
                 "image": result["image_base64"],

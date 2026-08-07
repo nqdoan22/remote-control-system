@@ -66,7 +66,7 @@ class KeyloggerControlRequest(BaseModel):
 class FileActionRequest(BaseModel):
     machine_id: str = Field(...)
     action: str = Field(..., description="Hành động: 'list' hoặc 'download'")
-    path: Optional[str] = Field("C:\\RemoteControl\\", description="Đường dẫn trong Sandbox")
+    path: Optional[str] = Field("", description="Đường dẫn con (tương đối) bên trong Sandbox; để trống = thư mục gốc")
 
 
 class WebcamControlRequest(BaseModel):
@@ -288,7 +288,7 @@ async def control_file_action(
     file.list / file.download. Chỉ thao tác trong sandbox folder (theo security_design.md).
     """
     msg_type = _resolve_type(_FILE_ACTION_TYPE, req.action)
-    payload = {"path": req.path or "C:\\RemoteControl\\"}
+    payload = {"path": req.path or ""}
     # file.download có thể chứa tới 50MB base64 (api_contract.md) -> cần timeout dài hơn mặc định
     file_timeout = 60 if req.action == "download" else None
     return await dispatch_command_and_log(db, current_user, req.machine_id, msg_type, payload, timeout=file_timeout)
