@@ -89,6 +89,7 @@ class CommandDispatcher(QObject):
             "power.restart": self._handle_power_restart,
             "power.shutdown": self._handle_power_shutdown,
             "power.sleep": self._handle_power_sleep,
+            "power.abort": self._handle_power_abort,
             # Permission Confirmation flow (Gateway -> Client App)
             "permission.request": self._handle_permission_request,
         }
@@ -346,6 +347,9 @@ class CommandDispatcher(QObject):
             }
             for item in result.get("items", [])
         ]
+        # Minh bạch với End User: ghi nhật ký công khai mọi lần Admin truy xuất tệp
+        # trong Sandbox (cùng triết lý Privacy-First như các module nhạy cảm khác).
+        self.main_window.append_log(f"📁 Admin đã duyệt thư mục Sandbox: '/{path}'.")
         self._send_response(original, {"entries": entries})
 
     def _handle_file_download(self, payload: Dict[str, Any], original: Dict[str, Any]) -> None:
@@ -360,6 +364,7 @@ class CommandDispatcher(QObject):
         mime_type, _ = mimetypes.guess_type(filename)
         size_bytes = len(base64.b64decode(content_b64)) if content_b64 else 0
 
+        self.main_window.append_log(f"📥 Admin đã tải xuống tệp từ Sandbox: '{filename}'.")
         self._send_response(original, {
             "filename": filename,
             "content": content_b64,
@@ -379,6 +384,7 @@ class CommandDispatcher(QObject):
             self._send_error(original, result.get("code", "INTERNAL_ERROR"), result.get("message", ""))
             return
 
+        self.main_window.append_log(f"📤 Admin đã tải tệp lên Sandbox: '{dest_path}'.")
         self._send_response(original, {"savedPath": result.get("saved_path", dest_path)})
 
     # =========================================================================
@@ -397,6 +403,11 @@ class CommandDispatcher(QObject):
 
     def _handle_power_sleep(self, payload: Dict[str, Any], original: Dict[str, Any]) -> None:
         self._finish_power(original, power_control.sleep_system())
+
+    def _handle_power_abort(self, payload: Dict[str, Any], original: Dict[str, Any]) -> None:
+        # Hủy lệnh tắt/khởi động lại đang đếm ngược (shutdown /a). KHÔNG nhạy cảm
+        # nên không đi qua Consent flow — được Gateway forward trực tiếp.
+        self._finish_power(original, power_control.abort_shutdown())
 
     def _finish_power(self, original: Dict[str, Any], result: Dict[str, Any]) -> None:
         if result.get("success"):

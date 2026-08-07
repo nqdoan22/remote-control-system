@@ -62,6 +62,10 @@ _WEBAPP_ALLOWED_TYPES: frozenset[str] = frozenset({
     "power.restart",
     "power.shutdown",
     "power.sleep",
+    # power.abort — hủy lệnh tắt/khởi động lại đang đếm ngược. KHÔNG thuộc
+    # SENSITIVE_MESSAGE_TYPES (thao tác an toàn) nên được forward trực tiếp,
+    # không chèn bước xin quyền.
+    "power.abort",
 })
 
 # Message types chỉ Client App được phép gửi (Response/Event direction: machine → webapp)

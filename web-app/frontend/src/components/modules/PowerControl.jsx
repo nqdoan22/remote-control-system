@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import { controlPowerApi, isWsError, getWsErrorMessage } from '../../services/api';
 
 /**
- * PowerControl Module - Điều khiển nguồn máy tính Client (Lock, Sleep, Restart, Shutdown).
- * power.lock / power.restart / power.shutdown / power.sleep qua REST.
- * Toàn bộ nằm trong Sensitive Feature List -> Gateway tự xin Permission Confirmation.
+ * PowerControl Module - Điều khiển nguồn máy tính Client (Lock, Sleep, Restart, Shutdown, Abort).
+ * power.lock / power.restart / power.shutdown / power.sleep qua REST -> nằm trong
+ * Sensitive Feature List nên Gateway tự xin Permission Confirmation.
+ * Riêng power.abort (hủy lệnh tắt/khởi động lại đang đếm ngược) KHÔNG nhạy cảm,
+ * được Gateway forward trực tiếp, không cần Consent.
  */
 const PowerControl = ({ selectedMachine }) => {
   const [loading, setLoading] = useState(false);
@@ -96,6 +98,19 @@ const PowerControl = ({ selectedMachine }) => {
             style={{ ...styles.actionBtn, backgroundColor: '#dc2626' }}
           >
             Tắt Máy Tính
+          </button>
+        </div>
+
+        <div style={styles.powerCard}>
+          <div style={{ fontSize: '2.5rem' }}>🛑</div>
+          <h3>Hủy Lệnh Tắt/Khởi Động Lại</h3>
+          <p style={styles.cardDesc}>Hủy tiến trình Tắt máy hoặc Khởi động lại đang trong thời gian đếm ngược (shutdown /a).</p>
+          <button
+            onClick={() => initiatePowerAction('abort', 'Hủy lệnh tắt/khởi động lại')}
+            disabled={loading}
+            style={{ ...styles.actionBtn, backgroundColor: '#15803d' }}
+          >
+            Hủy Lệnh
           </button>
         </div>
       </div>

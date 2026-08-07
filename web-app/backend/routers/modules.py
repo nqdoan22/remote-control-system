@@ -77,7 +77,7 @@ class WebcamControlRequest(BaseModel):
 
 class PowerControlRequest(BaseModel):
     machine_id: str = Field(...)
-    action: str = Field(..., description="Lệnh nguồn: 'lock', 'restart', 'shutdown', 'sleep'")
+    action: str = Field(..., description="Lệnh nguồn: 'lock', 'restart', 'shutdown', 'sleep', 'abort'")
     delay_seconds: Optional[int] = Field(0, description="Độ trễ trước khi thực hiện (giây), dùng cho restart/shutdown")
 
 
@@ -96,6 +96,7 @@ _POWER_ACTION_TYPE = {
     "restart": "power.restart",
     "shutdown": "power.shutdown",
     "sleep": "power.sleep",
+    "abort": "power.abort",  # Hủy lệnh tắt/khởi động lại đang đếm ngược (không cần Consent)
 }
 
 
@@ -348,8 +349,11 @@ async def control_power(
     """
     msg_type = _resolve_type(_POWER_ACTION_TYPE, req.action)
     payload = {"delaySeconds": req.delay_seconds or 0} if req.action in ("restart", "shutdown") else {}
-    # Toàn bộ Power Control nằm trong Sensitive Feature List -> có thể chờ Permission Confirmation
+    # lock/restart/shutdown/sleep nằm trong Sensitive Feature List -> Gateway chờ
+    # Permission Confirmation nên cần timeout dài. Riêng 'abort' KHÔNG nhạy cảm
+    # (được forward trực tiếp), phản hồi nhanh nên dùng timeout mặc định.
+    timeout = None if req.action == "abort" else settings.SENSITIVE_COMMAND_TIMEOUT_SECONDS
     return await dispatch_command_and_log(
         db, current_user, req.machine_id, msg_type, payload,
-        timeout=settings.SENSITIVE_COMMAND_TIMEOUT_SECONDS,
+        timeout=timeout,
     )
