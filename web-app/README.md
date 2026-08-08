@@ -42,7 +42,7 @@ REST endpoints:
 - `POST /api/v1/modules/processes`
 - `POST /api/v1/modules/screenshot`
 - `POST /api/v1/modules/live-screen`
-- `POST /api/v1/modules/keylogger`
+- `POST /api/v1/modules/input-audit`
 - `POST /api/v1/modules/file/action`
 - `POST /api/v1/modules/file/upload`
 - `POST /api/v1/modules/webcam`
@@ -60,7 +60,7 @@ REST endpoints:
   - Processes
   - Screenshot
   - Live Screen
-  - Keylogger
+  - Input Audit Log
   - File Transfer
   - Webcam
   - Power Control
@@ -188,5 +188,5 @@ web-app/
 ## Ghi chú
 
 - Backend tự khởi tạo kết nối tới Gateway khi startup.
-- Các lệnh nhạy cảm như live screen, webcam, keylogger và power control có thể cần user consent từ máy client.
+- Các lệnh nhạy cảm như live screen, webcam, input audit log và power control có thể cần user consent từ máy client.
 - Frontend mặc định làm việc với backend tại cổng `8000`.

@@ -8,14 +8,14 @@ Client App là agent Windows chạy trên máy trạm. Ứng dụng có giao di�
 - Gửi heartbeat định kỳ để báo trạng thái online.
 - Nhận lệnh từ Gateway và điều phối tới các module thực thi.
 - Hiển thị giao diện minh bạch cho người dùng cuối với trạng thái kết nối, CPU/RAM và nhật ký hoạt động.
-- Xin quyền người dùng cho các chức năng nhạy cảm như live screen, webcam, keylogger và power control.
+- Xin quyền người dùng cho các chức năng nhạy cảm như live screen, webcam, input audit log và power control.
 - Chạy trong system tray để tiếp tục hoạt động khi đóng cửa sổ.
 
 ## Yêu cầu hệ thống
 
 - Windows.
 - Python 3.10+.
-- Quyền đủ để dùng một số thao tác hệ thống như khóa màn hình, tắt máy hoặc hook keylogger.
+- Quyền đủ để dùng một số thao tác hệ thống như khóa màn hình, tắt máy hoặc hook input audit logger.
 
 ## Cấu trúc chính
 
@@ -31,7 +31,7 @@ Client App là agent Windows chạy trên máy trạm. Ứng dụng có giao di�
 - Processes: liệt kê và kết thúc tiến trình.
 - Screenshot: chụp ảnh màn hình và trả về base64.
 - Live Screen: stream màn hình liên tục.
-- Keylogger: ghi nhật ký phím bấm theo buffer.
+- Input Audit Log: ghi nhật ký phím bấm theo buffer.
 - File Manager: duyệt, tải lên, tải xuống và xóa file trong sandbox.
 - Webcam: stream camera và bật đèn báo đỏ khi đang hoạt động.
 - Power Control: khóa màn hình, restart, shutdown và sleep.

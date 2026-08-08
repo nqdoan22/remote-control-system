@@ -60,7 +60,7 @@ class WSErrorPayload(BaseModel):
 
 class WSPermissionRequestPayload(BaseModel):
     permissionId: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    feature: str = Field(..., description="Tên chức năng (VD: screen.live, webcam, keylogger)")
+    feature: str = Field(..., description="Tên chức năng (VD: screen.live, webcam, input_audit)")
     requestedBy: str = Field(..., description="Admin gửi yêu cầu")
     originalMessageId: str = Field(..., description="ID lệnh gốc từ Admin")
 

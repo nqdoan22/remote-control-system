@@ -248,7 +248,7 @@ class GatewayClient:
             # =========================================================================
             # 📡 ĐỊNH TUYẾN VỀ BROWSER (CẦU NỐI REAL-TIME /ws)
             # Trường hợp 1: Phản hồi/Lỗi cho lệnh Browser đã gửi -> trả về đúng Browser.
-            # Trường hợp 2: Sự kiện Broadcast (stream frame, keylogger, machine.status...)
+            # Trường hợp 2: Sự kiện Broadcast (stream frame, input_audit, machine.status...)
             #               -> gửi tới các Browser đang xem máy tương ứng.
             # =========================================================================
             if message.destination == "webapp" or (original_id and original_id in self.browser_pending):

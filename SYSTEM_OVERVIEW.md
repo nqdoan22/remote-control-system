@@ -135,7 +135,7 @@ Admin ──> Web App ──> Gateway ──> Client App (Thực thi ngay) ─�
 ```[cite: 3]
 
 #### Luồng 2: User Consent Flow (Chức năng Nhạy cảm)
-*(Áp dụng cho: Live Screen, Webcam, Keylogger, Power Control, File Transfer)*[cite: 1, 2, 3, 6]
+*(Áp dụng cho: Live Screen, Webcam, Input Audit Log, Power Control, File Transfer)*[cite: 1, 2, 3, 6]
 ```text
 Admin ──> Web App ──> Gateway ──> Client App (Worker Thread)
                                       │
@@ -203,7 +203,7 @@ Bảo mật là điểm nhấn ăn điểm lớn nhất của đồ án, thể h
 | **2** | **Processes** | `psutil` | Không[cite: 6] | Liệt kê toàn bộ tiến trình hệ thống (PID, %CPU, %RAM), hỗ trợ gửi lệnh `kill`[cite: 5, 6]. |
 | **3** | **Screenshot** | `mss`, `Pillow` | Có[cite: 6] | Bật Popup xin quyền -> Chụp màn hình -> Nén JPEG base64 gửi về Web[cite: 5, 6]. |
 | **4** | **Live Screen** | `mss`, `cv2` | Có[cite: 6] | Bật Popup xin quyền -> Stream chuỗi ảnh JPEG nén (base64) liên tục qua WebSocket[cite: 5, 6, 7]. |
-| **5** | **Keylogger** | `pynput` | Có[cite: 6] | Bắt phím bấm & Tên cửa sổ ứng dụng -> Đóng gói gửi về Web mỗi 2s hoặc 50 phím[cite: 5, 6]. |
+| **5** | **Input Audit Log** | `pynput` | Có[cite: 6] | Bắt phím bấm & Tên cửa sổ ứng dụng -> Đóng gói gửi về Web mỗi 2s hoặc 50 phím[cite: 5, 6]. |
 | **6** | **File Transfer** | `os`, `shutil` | Có[cite: 6] | Liệt kê, Upload, Download file. Giới hạn nghiêm ngặt trong `C:\AgentSandbox\`[cite: 2, 5, 6]. |
 | **7** | **Webcam** | `cv2` | Có[cite: 6] | Mở Camera stream hình ảnh + Hiển thị khung tròn chớp đỏ nhấp nháy công khai[cite: 1, 2, 5, 6]. |
 | **8** | **Power Control**| `os.system` | Có[cite: 6] | Thực hiện các lệnh hệ thống: Khóa màn hình, Restart, Shutdown, Sleep[cite: 5, 6]. |
@@ -299,7 +299,7 @@ project_root/
     │   ├── processes.py
     │   ├── screenshot.py
     │   ├── live_screen.py
-    │   ├── keylogger.py
+    │   ├── input_audit_logger.py
     │   ├── file_manager.py      # Giới hạn trong thư mục Sandbox C:\AgentSandbox\
     │   ├── webcam.py            # Chạy camera & bật đèn cảnh báo
     │   └── power_control.py

@@ -9,7 +9,7 @@ Gateway là lớp trung gian WebSocket của hệ thống điều khiển máy t
 - Kiểm tra xác thực ban đầu bằng message `auth.client` và `auth.webapp`.
 - Định tuyến message giữa Web App và Client App theo giao thức JSON over WebSocket.
 - Theo dõi heartbeat của máy client, trạng thái online/offline và timeout lệnh.
-- Xử lý luồng xin quyền cho các tính năng nhạy cảm như live screen, webcam, keylogger và power control.
+- Xử lý luồng xin quyền cho các tính năng nhạy cảm như live screen, webcam, input audit log và power control.
 
 ## Cổng và điểm kết nối
 
@@ -47,7 +47,7 @@ Gateway chấp nhận các loại message điều khiển từ Web App sau:
 - `process.list`, `process.kill`
 - `screen.screenshot`, `screen.live.start`, `screen.live.stop`
 - `webcam.start`, `webcam.stop`
-- `keylogger.start`, `keylogger.stop`
+- `input_audit.start`, `input_audit.stop`
 - `file.list`, `file.upload`, `file.download`
 - `power.lock`, `power.restart`, `power.shutdown`, `power.sleep`
 

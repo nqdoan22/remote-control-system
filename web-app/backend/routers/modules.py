@@ -58,7 +58,7 @@ class LiveScreenRequest(BaseModel):
     fps: Optional[int] = Field(10, description="Số frame/giây (mặc định 10, tối đa 30)")
 
 
-class KeyloggerControlRequest(BaseModel):
+class InputAuditControlRequest(BaseModel):
     machine_id: str = Field(...)
     action: str = Field(..., description="Hành động: 'start' hoặc 'stop'")
 
@@ -88,7 +88,7 @@ class PowerControlRequest(BaseModel):
 _APP_ACTION_TYPE = {"list": "application.list", "start": "application.start", "stop": "application.stop"}
 _PROCESS_ACTION_TYPE = {"list": "process.list", "kill": "process.kill"}
 _LIVESCREEN_ACTION_TYPE = {"start": "screen.live.start", "stop": "screen.live.stop"}
-_KEYLOGGER_ACTION_TYPE = {"start": "keylogger.start", "stop": "keylogger.stop"}
+_INPUT_AUDIT_ACTION_TYPE = {"start": "input_audit.start", "stop": "input_audit.stop"}
 _FILE_ACTION_TYPE = {"list": "file.list", "download": "file.download"}
 _WEBCAM_ACTION_TYPE = {"start": "webcam.start", "stop": "webcam.stop"}
 _POWER_ACTION_TYPE = {
@@ -260,19 +260,19 @@ async def control_live_screen(
     return await dispatch_command_and_log(db, current_user, req.machine_id, msg_type, payload, timeout=timeout)
 
 
-# --- MODULE 5: KEYLOGGER ---
-@router.post("/keylogger", summary="5. Bắt phím Keylogger (Cần User Accept)")
-async def control_keylogger(
-    req: KeyloggerControlRequest,
+# --- MODULE 5: INPUT AUDIT LOG ---
+@router.post("/input-audit", summary="5. Ghi nhật ký thao tác phím - Input Audit Log (Cần User Accept)")
+async def control_input_audit(
+    req: InputAuditControlRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    keylogger.start / keylogger.stop.
-    *Yêu cầu:* keylogger.start nằm trong Sensitive Feature List.
+    input_audit.start / input_audit.stop.
+    *Yêu cầu:* input_audit.start nằm trong Sensitive Feature List.
     """
-    msg_type = _resolve_type(_KEYLOGGER_ACTION_TYPE, req.action)
-    # keylogger.start nằm trong Sensitive Feature List -> có thể chờ Permission Confirmation
+    msg_type = _resolve_type(_INPUT_AUDIT_ACTION_TYPE, req.action)
+    # input_audit.start nằm trong Sensitive Feature List -> có thể chờ Permission Confirmation
     timeout = settings.SENSITIVE_COMMAND_TIMEOUT_SECONDS if req.action == "start" else None
     return await dispatch_command_and_log(db, current_user, req.machine_id, msg_type, {}, timeout=timeout)
 

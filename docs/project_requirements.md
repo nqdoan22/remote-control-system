@@ -55,7 +55,7 @@ Các chức năng được chia làm 2 nhóm dựa trên mức độ nhạy cả
 - **Webcam Control:**
   - Bật/Tắt Webcam để truyền phát hình ảnh.
   - **Ràng buộc:** Phải hiển thị một đèn báo/chỉ báo (Indicator) rõ ràng trên màn hình End User liên tục trong suốt quá trình Webcam mở.
-- **Keylogger (Ghi phím):**
+- **Input Audit Log (Ghi phím):**
   - Bắt đầu/Dừng ghi nhận thao tác gõ phím của End User.
 - **Power Management (Điều khiển nguồn):**
   - Tắt máy (Shutdown), Khởi động lại (Restart), Khóa màn hình (Lock), Ngủ (Sleep).

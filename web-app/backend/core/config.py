@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     COMMAND_TIMEOUT_SECONDS: int = 15
 
     # Timeout riêng cho các lệnh thuộc Sensitive Feature List (screen.live.start,
-    # webcam.start, keylogger.start, power.*). Theo api_contract.md, Gateway có thể
+    # webcam.start, input_audit.start, power.*). Theo api_contract.md, Gateway có thể
     # chờ Permission Confirmation từ End User tối đa PERMISSION_TIMEOUT = 30s trước
     # khi trả lời -> phải chờ lâu hơn con số đó để không timeout hụt phía Backend.
     SENSITIVE_COMMAND_TIMEOUT_SECONDS: int = 35

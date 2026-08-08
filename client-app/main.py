@@ -90,7 +90,7 @@ class AgentApplication:
         self.red_indicator = RedIndicatorWidget()
 
         # Service quản lý luồng xin quyền End User cho các tính năng nhạy cảm
-        # (screen.live, webcam, keylogger, power.*) — xem Sensitive Feature List
+        # (screen.live, webcam, input_audit, power.*) — xem Sensitive Feature List
         # trong docs/api_contract.md.
         self.permission_service = PermissionService()
         self.permission_service.show_popup_signal.connect(self._show_permission_popup)

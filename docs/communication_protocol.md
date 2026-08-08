@@ -154,7 +154,7 @@ Tên message tuân theo format: `[module].[action]`
 | **process** | `list`, `kill` |
 | **screen** | `screenshot`, `live.start`, `live.stop`, `live.frame` |
 | **webcam** | `start`, `stop`, `frame` |
-| **keylogger** | `start`, `stop`, `data` |
+| **input_audit** | `start`, `stop`, `data` |
 | **file** | `list`, `upload`, `download` |
 | **power** | `lock`, `restart`, `shutdown`, `sleep` |
 
@@ -267,7 +267,7 @@ Nếu có lỗi, thành phần phát hiện lỗi trả về message có type `e
 | `PERMISSION_TIMEOUT` | **End User không phản hồi trong thời gian chờ (mặc định 30s tại Gateway).** (Gateway phát ra) |
 | `TIMEOUT` | Client App không gửi `response`/`error` trong `COMMAND_TIMEOUT` giây sau khi nhận lệnh. |
 | `INVALID_PATH` | Cố ý truy cập file ngoài thư mục Sandbox. |
-| `ALREADY_RUNNING` / `NOT_RUNNING` | Chức năng streaming/keylogger đã đang chạy hoặc chưa được khởi động. |
+| `ALREADY_RUNNING` / `NOT_RUNNING` | Chức năng streaming/input audit log đã đang chạy hoặc chưa được khởi động. |
 | `WEBCAM_NOT_FOUND` | Không thể mở thiết bị webcam trên máy Client. |
 | `INTERNAL_ERROR` | Lỗi xảy ra trong lúc gọi thư viện hệ thống (psutil, cv2, mss...). |
 

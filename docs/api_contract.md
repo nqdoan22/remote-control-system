@@ -28,7 +28,7 @@ Tài liệu bao gồm:
 | Screenshot      | `screen.screenshot`   |
 | Live Screen     | `screen.live.start`   |
 | Webcam          | `webcam.start`        |
-| Key Logger      | `keylogger.start`     |
+| Input Audit Log | `input_audit.start`   |
 | Power — Lock    | `power.lock`          |
 | Power — Restart | `power.restart`       |
 | Power — Shutdown| `power.shutdown`      |
@@ -622,41 +622,41 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 
 ---
 
-# Key Logger Messages
+# Input Audit Log Messages
 
 > Chức năng nhạy cảm — xem **Permission Confirmation Messages**.
 
-## keylogger.start
+## input_audit.start
 
 **Web App → Gateway → Client App** *(sau khi permission granted)*
 
 ```json
 {
-  "type": "keylogger.start",
+  "type": "input_audit.start",
   "payload": {}
 }
 
 ```
 
-## keylogger.stop
+## input_audit.stop
 
 **Web App → Gateway → Client App**
 
 ```json
 {
-  "type": "keylogger.stop",
+  "type": "input_audit.stop",
   "payload": {}
 }
 
 ```
 
-## keylogger.data
+## input_audit.data
 
 **Client App → Gateway → Web App** *(event — gửi định kỳ khi đang chạy)*
 
 ```json
 {
-  "type": "keylogger.data",
+  "type": "input_audit.data",
   "payload": {
     "entries": [
       {
@@ -674,7 +674,7 @@ Ngoại lệ: `machine.list` không cần `destinationMachineId` vì được x�
 
 ```
 
-> `keylogger.data` được gửi mỗi 2 giây hoặc khi buffer đạt 50 phím, tùy điều kiện nào đến trước.
+> `input_audit.data` được gửi mỗi 2 giây hoặc khi buffer đạt 50 phím, tùy điều kiện nào đến trước.
 
 ---
 
@@ -927,7 +927,7 @@ Ví dụ lỗi do Gateway phát ra (End User từ chối cấp quyền):
 | Code | Mô tả |
 | --- | --- |
 | `INVALID_COMMAND` | Lệnh không tồn tại, sai format JSON, message type không được phép, hoặc thiếu `destinationMachineId`. |
-| `ALREADY_RUNNING` | Chức năng (live screen / webcam / keylogger) đang chạy rồi. |
+| `ALREADY_RUNNING` | Chức năng (live screen / webcam / input audit log) đang chạy rồi. |
 | `NOT_RUNNING` | Chức năng chưa được khởi động, không thể stop. |
 | `TIMEOUT` | Client App không phản hồi (`response`/`error`) trong `COMMAND_TIMEOUT` giây (mặc định 15s) sau khi Gateway forward lệnh. |
 

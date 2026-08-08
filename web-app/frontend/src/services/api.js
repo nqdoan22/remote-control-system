@@ -136,7 +136,7 @@ export const takeScreenshotApi = (machineId) =>
     { timeout: SENSITIVE_COMMAND_TIMEOUT_MS }
   );
 
-// Lệnh thuộc Sensitive Feature List (screen.live.start, webcam.start, keylogger.start,
+// Lệnh thuộc Sensitive Feature List (screen.live.start, webcam.start, input_audit.start,
 // power.*) có thể mất tới ~35s phía Backend (chờ Permission Confirmation ở Gateway,
 // tối đa 30s theo api_contract.md) -> phải nới timeout HTTP client, nếu không axios
 // sẽ tự hủy request trước khi Backend kịp trả lời.
@@ -149,9 +149,9 @@ export const controlLiveScreenApi = (machineId, action, fps = 10) =>
     { timeout: SENSITIVE_COMMAND_TIMEOUT_MS }
   );
 
-export const controlKeyloggerApi = (machineId, action) =>
+export const controlInputAuditApi = (machineId, action) =>
   api.post(
-    '/modules/keylogger',
+    '/modules/input-audit',
     { machine_id: machineId, action },
     { timeout: SENSITIVE_COMMAND_TIMEOUT_MS }
   );

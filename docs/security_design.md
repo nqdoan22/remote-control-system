@@ -89,7 +89,7 @@ Gateway hoạt động như một chốt chặn kiểm soát luồng đi của M
 
 # User Consent & Privacy (Bảo vệ Quyền riêng tư)
 
-Đây là cơ chế bảo mật quan trọng nhất phía End User. Các chức năng: **Live Screen, Webcam, Keylogger, Power Control** bị khóa mặc định.
+Đây là cơ chế bảo mật quan trọng nhất phía End User. Các chức năng: **Live Screen, Webcam, Input Audit Log, Power Control** bị khóa mặc định.
 
 ## Luồng cấp quyền (Consent Flow):
 

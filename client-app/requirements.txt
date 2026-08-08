@@ -10,7 +10,7 @@ websockets>=12.0
 # System/process/hardware info (heartbeat cpu/ram, processes.py, applications.py)
 psutil>=5.9.8
 
-# Keyboard hook (keylogger.py)
+# Keyboard hook (input_audit_logger.py)
 pynput>=1.7.7
 
 # Screen capture (screenshot.py, live_screen.py)

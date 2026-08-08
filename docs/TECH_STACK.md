@@ -39,7 +39,7 @@ Hệ thống được thiết kế theo mô hình **3-Tier Architecture** gồm 
 * **psutil:** Truy xuất danh sách tiến trình (Processes), ứng dụng (Applications), đo lường %CPU và %RAM real-time.
 * **opencv-python (cv2):** Truy cập Webcam, chụp ảnh/stream luồng video từ camera.
 * **mss & Pillow (PIL):** Chụp ảnh màn hình tốc độ cao (Screenshot) và mã hóa JPEG phục vụ Live Screen.
-* **pynput:** Lắng nghe sự kiện bàn phím (Keylogger) phục vụ ghi nhận thao tác khi được cấp phép.
+* **pynput:** Lắng nghe sự kiện bàn phím (Input Audit Log) phục vụ ghi nhận thao tác khi được cấp phép.
 
 ---
 
@@ -51,7 +51,7 @@ Hệ thống được thiết kế theo mô hình **3-Tier Architecture** gồm 
 | **2** | **Processes** | `psutil` | Quản lý toàn bộ tiến trình hệ thống, theo dõi %CPU, %RAM chi tiết, hỗ trợ gửi lệnh kết thúc tiến trình (`kill`). |
 | **3** | **Screenshot** | `mss`, `Pillow` | Chụp ảnh màn hình máy Client theo thời gian thực. **Yêu cầu người dùng bấm Accept trên Popup trước khi chụp.** |
 | **4** | **Live Screen** | `mss`, `cv2` | Stream màn hình máy Client trực tiếp lên Web App dạng chuỗi ảnh JPEG nén qua WebSocket. **Yêu cầu xin quyền người dùng.** |
-| **5** | **Keylogger** | `pynput` | Ghi nhận các phím bấm và ứng dụng đang được thao tác. **Bắt buộc có sự xác nhận của người dùng mới kích hoạt.** |
+| **5** | **Input Audit Log** | `pynput` | Ghi nhận các phím bấm và ứng dụng đang được thao tác. **Bắt buộc có sự xác nhận của người dùng mới kích hoạt.** |
 | **6** | **File Transfer** | `os`, `shutil` | Tải lên (Upload) / Tải về (Download) tập tin. **Chỉ được phép truy cập trong thư mục Sandbox cấu hình trước (Tránh Directory Traversal).** |
 | **7** | **Webcam** | `cv2` | Mở camera thu hình ảnh. **Bắt buộc có xác nhận người dùng. Xuất hiện chấm đỏ nhấp nháy trên màn hình máy bị điều khiển khi đang quay.** |
 | **8** | **Power Control** | `os.system` | Thực hiện các lệnh hệ thống: Khóa màn hình (`Lock`), Khởi động lại (`Restart`), Tắt máy (`Shutdown`), Ngủ (`Sleep`). **Yêu cầu xác nhận.** |
@@ -64,7 +64,7 @@ Dự án chú trọng khía cạnh tư duy rủi ro và an toàn thông tin bằ
 
 ### 4.1. Cơ chế Xin quyền Chủ động (User Explicit Consent)
 
-* Các chức năng nhạy cảm (**Screen, Keylogger, Webcam, Power, File**) không được tự ý kích hoạt ngầm.
+* Các chức năng nhạy cảm (**Screen, Input Audit Log, Webcam, Power, File**) không được tự ý kích hoạt ngầm.
 * Khi Admin gửi yêu cầu, Client App sẽ bật **Popup PyQt6 luôn nằm trên cùng (Always on Top)** xin phép End-User.
 * Nếu người dùng bấm **Reject** hoặc **hết thời gian chờ (Timeout - 15s)**, hệ thống sẽ tự động hủy lệnh và báo lỗi về Web App.
 
@@ -166,7 +166,7 @@ project_root/
     │   ├── processes.py
     │   ├── screenshot.py
     │   ├── live_screen.py
-    │   ├── keylogger.py
+    │   ├── input_audit_logger.py
     │   ├── file_manager.py      # Giới hạn trong thư mục Sandbox
     │   ├── webcam.py            # Chạy camera & gọi đèn chớp đỏ
     │   └── power_control.py

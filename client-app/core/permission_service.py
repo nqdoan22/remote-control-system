@@ -61,7 +61,7 @@ class PermissionService(QObject):
 
         Args:
             permission_id (str): Mã yêu cầu xin quyền do Gateway cấp.
-            feature (str): Tên chức năng nhạy cảm (VD: 'webcam', 'screen.live', 'keylogger')
+            feature (str): Tên chức năng nhạy cảm (VD: 'webcam', 'screen.live', 'input_audit')
             requested_by (str): Tên Admin thực hiện gửi lệnh
 
         Returns:

@@ -11,7 +11,7 @@ import Applications from '../components/modules/Applications';
 import Processes from '../components/modules/Processes';
 import Screenshot from '../components/modules/Screenshot';
 import LiveScreen from '../components/modules/LiveScreen';
-import KeyLogger from '../components/modules/KeyLogger';
+import InputAuditLog from '../components/modules/InputAuditLog';
 import FileTransfer from '../components/modules/FileTransfer';
 import Webcam from '../components/modules/Webcam';
 import PowerControl from '../components/modules/PowerControl';
@@ -22,7 +22,7 @@ const MODULE_COMPONENTS = {
   processes: Processes,
   screenshot: Screenshot,
   livescreen: LiveScreen,
-  keylogger: KeyLogger,
+  input_audit: InputAuditLog,
   filemanager: FileTransfer,
   webcam: Webcam,
   power: PowerControl,
@@ -82,7 +82,7 @@ const MachinePage = () => {
   // Các Module Component giờ điều khiển qua REST API (services/api.js) - đúng
   // theo docs/api_contract.md - và chỉ dùng `lastMessage` (shape {type, payload}
   // nguyên vẹn từ Gateway/Client App) để nhận dữ liệu streaming: screen.live.frame,
-  // webcam.frame, keylogger.data. Không còn cần adapter action/status/data nữa.
+  // webcam.frame, input_audit.data. Không còn cần adapter action/status/data nữa.
   // =========================================================================
   // 🖥️ CHUẨN HÓA selectedMachine: Các Module Component yêu cầu object có
   // { machineId, hostname, ipAddress, status } từ REST MachineResponse.

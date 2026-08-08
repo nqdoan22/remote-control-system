@@ -27,7 +27,7 @@ FEATURE_NAMES_VN = {
     "screen.screenshot": "Chụp ảnh màn hình (Screenshot)",
     "screen.live": "Xem màn hình thời gian thực (Live Screen)",
     "webcam": "Bật Camera / Webcam",
-    "keylogger": "Ghi bàn phím (Keylogger)",
+    "input_audit": "Ghi nhật ký thao tác bàn phím (Input Audit Log)",
     "power.lock": "Khóa màn hình (Lock Screen)",
     "power.restart": "Khởi động lại máy (Restart)",
     "power.shutdown": "Tắt máy (Shutdown)",

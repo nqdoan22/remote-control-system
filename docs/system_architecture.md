@@ -157,7 +157,7 @@ Admin <── Web App <── Gateway <───────┘ (Trả về kế
 
 ## 2. User Consent Flow (Chức năng nhạy cảm)
 
-*(Ví dụ: Live Screen, Keylogger, Webcam, Shutdown, File)*
+*(Ví dụ: Live Screen, Input Audit Log, Webcam, Shutdown, File)*
 
 ```text
 Admin ──> Web App ──> Gateway ──> Client App (Worker Thread)

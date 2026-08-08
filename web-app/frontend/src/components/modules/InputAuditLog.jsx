@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { controlKeyloggerApi, isWsError, getWsErrorMessage } from '../../services/api';
+import { controlInputAuditApi, isWsError, getWsErrorMessage } from '../../services/api';
 
 /**
- * Keylogger Module - Theo dõi phím bấm từ máy Client theo thời gian thực.
- * keylogger.start / keylogger.stop qua REST (Sensitive Feature List). Dữ liệu
- * phím (keylogger.data) nhận qua WebSocket broadcast, payload = { entries: [{key,
+ * Input Audit Log Module - Theo dõi phím bấm từ máy Client theo thời gian thực.
+ * input_audit.start / input_audit.stop qua REST (Sensitive Feature List). Dữ liệu
+ * phím (input_audit.data) nhận qua WebSocket broadcast, payload = { entries: [{key,
  * timestamp}], windowTitle } theo api_contract.md.
  */
-const Keylogger = ({ selectedMachine, lastMessage }) => {
+const InputAuditLog = ({ selectedMachine, lastMessage }) => {
   const [isLogging, setIsLogging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [keystrokes, setKeystrokes] = useState([]); // [{ key, timestamp, windowTitle }]
@@ -16,23 +16,23 @@ const Keylogger = ({ selectedMachine, lastMessage }) => {
   const logContainerRef = useRef(null);
   const isLoggingRef = useRef(false);
 
-  const stopKeylogger = async (silent = false) => {
+  const stopInputAudit = async (silent = false) => {
     setIsLogging(false);
     isLoggingRef.current = false;
     setLoading(false);
     if (!selectedMachine) return;
     try {
-      await controlKeyloggerApi(selectedMachine.machineId, 'stop');
+      await controlInputAuditApi(selectedMachine.machineId, 'stop');
     } catch (err) {
-      if (!silent) alert('Lỗi dừng Keylogger: ' + (err?.detail || 'Không rõ nguyên nhân'));
+      if (!silent) alert('Lỗi dừng Input Audit Log: ' + (err?.detail || 'Không rõ nguyên nhân'));
     }
   };
 
-  // Reset khi đổi máy / rời trang -> tự động dừng keylogger
+  // Reset khi đổi máy / rời trang -> tự động dừng input audit log
   useEffect(() => {
     setKeystrokes([]);
     return () => {
-      if (isLoggingRef.current) stopKeylogger(true);
+      if (isLoggingRef.current) stopInputAudit(true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMachine?.machineId]);
@@ -44,21 +44,21 @@ const Keylogger = ({ selectedMachine, lastMessage }) => {
     }
   }, [keystrokes]);
 
-  // Nhận dữ liệu phím bấm đẩy về từ Client (keylogger.data - event định kỳ)
+  // Nhận dữ liệu phím bấm đẩy về từ Client (input_audit.data - event định kỳ)
   useEffect(() => {
     if (!lastMessage || !isLogging) return;
-    if (lastMessage.type === 'keylogger.data') {
+    if (lastMessage.type === 'input_audit.data') {
       const { entries = [], windowTitle } = lastMessage.payload || {};
       const tagged = entries.map((e) => ({ ...e, windowTitle }));
       setKeystrokes((prev) => [...prev, ...tagged]);
     }
   }, [lastMessage, isLogging]);
 
-  const startKeylogger = async () => {
+  const startInputAudit = async () => {
     if (!selectedMachine) return;
     setLoading(true);
     try {
-      const res = await controlKeyloggerApi(selectedMachine.machineId, 'start');
+      const res = await controlInputAuditApi(selectedMachine.machineId, 'start');
       setLoading(false);
       if (isWsError(res)) {
         alert(getWsErrorMessage(res));
@@ -68,7 +68,7 @@ const Keylogger = ({ selectedMachine, lastMessage }) => {
       }
     } catch (err) {
       setLoading(false);
-      alert('Lỗi khởi động Keylogger: ' + (err?.detail || 'Không rõ nguyên nhân'));
+      alert('Lỗi khởi động Input Audit Log: ' + (err?.detail || 'Không rõ nguyên nhân'));
     }
   };
 
@@ -78,7 +78,7 @@ const Keylogger = ({ selectedMachine, lastMessage }) => {
     const blob = new Blob([rawContent], { type: 'text/plain;charset=utf-8' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Keylog_${selectedMachine?.hostname}_${Date.now()}.txt`;
+    link.download = `InputAuditLog_${selectedMachine?.hostname}_${Date.now()}.txt`;
     link.click();
   };
 
@@ -102,17 +102,17 @@ const Keylogger = ({ selectedMachine, lastMessage }) => {
   return (
     <div style={styles.container}>
       <div style={styles.privacyNotice}>
-        🛡️ <b>CẢNH BÁO BẢO MẬT VÀ QUYỀN RIÊNG TƯ:</b> Tính năng Keylogger yêu cầu sự đồng ý trực tiếp (Explicit Consent) từ người dùng Client.
+        🛡️ <b>CẢNH BÁO BẢO MẬT VÀ QUYỀN RIÊNG TƯ:</b> Tính năng Input Audit Log yêu cầu sự đồng ý trực tiếp (Explicit Consent) từ người dùng Client.
       </div>
 
       <div style={styles.topBar}>
         <div style={styles.actionGroup}>
           {!isLogging ? (
-            <button onClick={startKeylogger} disabled={loading} style={styles.btnStart}>
+            <button onClick={startInputAudit} disabled={loading} style={styles.btnStart}>
               {loading ? '⏳ Đang xin phép người dùng Client...' : '⌨️ Bắt Đầu Theo Dõi Phím'}
             </button>
           ) : (
-            <button onClick={() => stopKeylogger()} style={styles.btnStop}>
+            <button onClick={() => stopInputAudit()} style={styles.btnStop}>
               ⏹ Dừng Ghi Phím
             </button>
           )}
@@ -181,4 +181,4 @@ const styles = {
   keyTag: { padding: '4px 8px', borderRadius: '4px', fontSize: '0.85rem', display: 'inline-block', border: '1px solid rgba(255,255,255,0.1)' }
 };
 
-export default Keylogger;
+export default InputAuditLog;

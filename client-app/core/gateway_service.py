@@ -49,7 +49,7 @@ class GatewayService(QThread):
         self.loop: Optional[asyncio.AbstractEventLoop] = None
 
         # Hàng đợi tin nhắn ĐIỀU KHIỂN (ưu tiên cao): auth.client, heartbeat,
-        # response/error, permission.response, keylogger.data. Luôn được gửi
+        # response/error, permission.response, input_audit.data. Luôn được gửi
         # TRƯỚC frame stream để response (VD: application.list, process.list)
         # không bị kẹt sau hàng trăm frame -> Backend không bị timeout 15s.
         self.control_queue: Optional[asyncio.Queue] = None

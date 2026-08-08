@@ -85,7 +85,7 @@ SENSITIVE_MESSAGE_TYPES: frozenset[str] = frozenset({
     "screen.screenshot",
     "screen.live.start",
     "webcam.start",
-    "keylogger.start",
+    "input_audit.start",
     "power.lock",
     "power.restart",
     "power.shutdown",

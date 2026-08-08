@@ -6,7 +6,7 @@ export const MODULE_TABS = [
   { id: 'processes', label: 'Processes', icon: '⚙️', sensitive: false },
   { id: 'screenshot', label: 'Screenshot', icon: '📸', sensitive: true },
   { id: 'livescreen', label: 'Live Screen', icon: '🖥️', sensitive: true },
-  { id: 'keylogger', label: 'KeyLogger', icon: '⌨️', sensitive: true },
+  { id: 'input_audit', label: 'Input Audit Log', icon: '⌨️', sensitive: true },
   { id: 'filemanager', label: 'File Transfer', icon: '📁', sensitive: true },
   { id: 'webcam', label: 'Webcam', icon: '📷', sensitive: true },
   { id: 'power', label: 'Power Control', icon: '⚡', sensitive: true },
