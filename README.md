@@ -2,6 +2,17 @@
 
 Hệ thống điều khiển máy tính từ xa gồm 3 thành phần độc lập. Chi tiết từng thành phần xem ở README riêng: [gateway/README.md](gateway/README.md), [client-app/README.md](client-app/README.md), [web-app/README.md](web-app/README.md).
 
+## 📦 Release & Source code
+
+- **Bản chạy (GitHub Release):** https://github.com/nqdoan22/remote-control-system/releases — tải `RemoteControlClient-win64.zip` để chạy Client App không cần cài Python.
+- **Source code (Google Drive):** _`<DÁN LINK GOOGLE DRIVE Ở ĐÂY>`_
+- **Cách tạo bản release:** xem [docs/RELEASE_GUIDE.md](docs/RELEASE_GUIDE.md). Đóng gói Client App thành `.exe`:
+
+  ```powershell
+  cd client-app
+  powershell -ExecutionPolicy Bypass -File build_exe.ps1
+  ```
+
 ## Cấu trúc
 
 ```
